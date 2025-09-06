@@ -283,14 +283,8 @@ SF_FFMPEG_API int sf_encoder_init(SF_Encoder* encoder, const char* format_name, 
     encoder->codec_ctx = avcodec_alloc_context3(codec);
     if (!encoder->codec_ctx) return -3;
 
-    // Set parameters
-    encoder->codec_ctx->channels = channels;
-    AVChannelLayout ch_layout = AV_CHANNEL_LAYOUT_STEREO;
-    if (channels == 1) {
-        ch_layout = (AVChannelLayout)AV_CHANNEL_LAYOUT_MONO;
-    } else {
-        av_channel_layout_default(&ch_layout, channels);
-    }
+    AVChannelLayout ch_layout;
+    av_channel_layout_default(&ch_layout, channels);
     av_channel_layout_copy(&encoder->codec_ctx->ch_layout, &ch_layout);
     encoder->codec_ctx->sample_rate = sampleRate;
     encoder->codec_ctx->time_base = (AVRational){1, sampleRate};
@@ -315,7 +309,7 @@ SF_FFMPEG_API int sf_encoder_init(SF_Encoder* encoder, const char* format_name, 
     if (avcodec_parameters_from_context(encoder->stream->codecpar, encoder->codec_ctx) < 0) return -6;
 
     encoder->io_buffer = (uint8_t*)av_malloc(IO_BUFFER_SIZE);
-    avio_alloc_context(encoder->io_buffer, IO_BUFFER_SIZE, 1, encoder, NULL, (int (*)(void*, const uint8_t*, int)) write_packet_callback, NULL);
+    encoder->avio_ctx = avio_alloc_context(encoder->io_buffer, IO_BUFFER_SIZE, 1, encoder, NULL, write_packet_callback, NULL);
     encoder->format_ctx->pb = encoder->avio_ctx;
 
     if (avformat_write_header(encoder->format_ctx, NULL) < 0) return -7;
