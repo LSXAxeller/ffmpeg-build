@@ -9,6 +9,7 @@ FFMPEG_CONFIGURE_FLAGS=(
     --enable-static
     --enable-pic
 
+    # General Disables
     --disable-doc
     --disable-debug
     --disable-avdevice
@@ -36,6 +37,7 @@ FFMPEG_CONFIGURE_FLAGS=(
     --disable-videotoolbox
     --disable-audiotoolbox
 
+    # Enabled Filters
     --disable-filters
     --enable-filter=aformat
     --enable-filter=anull
@@ -45,10 +47,12 @@ FFMPEG_CONFIGURE_FLAGS=(
     --enable-filter=setpts
     --enable-filter=trim
 
+    # Enabled Protocols
     --disable-protocols
     --enable-protocol=file
     --enable-protocol=pipe
 
+    # Enabled Demuxers
     --enable-demuxer=image2
     --enable-demuxer=aac
     --enable-demuxer=ac3
@@ -95,6 +99,7 @@ FFMPEG_CONFIGURE_FLAGS=(
     --enable-demuxer=xwma
     --enable-demuxer=dsf
 
+    # Enabled Decoders
     --enable-decoder=aac
     --enable-decoder=aac_latm
     --enable-decoder=ac3
@@ -133,7 +138,6 @@ FFMPEG_CONFIGURE_FLAGS=(
     --enable-decoder=wmav1
     --enable-decoder=wmav2
     --enable-decoder=wmavoice
-
     --enable-decoder=pcm_alaw
     --enable-decoder=pcm_bluray
     --enable-decoder=pcm_dvd
@@ -169,6 +173,7 @@ FFMPEG_CONFIGURE_FLAGS=(
     --enable-decoder=dsd_lsbf_planar
     --enable-decoder=dsd_msbf_planar
 
+    # Enabled Parsers
     --enable-parser=aac
     --enable-parser=aac_latm
     --enable-parser=ac3
@@ -179,4 +184,61 @@ FFMPEG_CONFIGURE_FLAGS=(
     --enable-parser=mpegaudio
     --enable-parser=tak
     --enable-parser=vorbis
+
+    # Enabled Encoders
+    # Lossy and Lossless encoders
+    --enable-encoder=aac
+    --enable-encoder=ac3
+    --enable-encoder=alac
+    --enable-encoder=aptx
+    --enable-encoder=aptx_hd
+    --enable-encoder=eac3
+    --enable-encoder=flac
+    --enable-encoder=g723_1
+    --enable-encoder=g726
+    --enable-encoder=g726le
+    --enable-encoder=mp2
+    --enable-encoder=nellymoser
+    --enable-encoder=opus
+    --enable-encoder=real_144
+    --enable-encoder=sbc
+    --enable-encoder=sonic
+    --enable-encoder=sonicls
+    --enable-encoder=tta
+    --enable-encoder=vorbis
+    --enable-encoder=wavpack
+    --enable-encoder=wmav1
+    --enable-encoder=wmav2
+
+    # PCM (Uncompressed) encoders
+    --enable-encoder=pcm_alaw
+    --enable-encoder=pcm_mulaw
+    --enable-encoder=pcm_f32be
+    --enable-encoder=pcm_f32le
+    --enable-encoder=pcm_f64be
+    --enable-encoder=pcm_f64le
+    --enable-encoder=pcm_s8
+    --enable-encoder=pcm_s8_planar
+    --enable-encoder=pcm_s16be
+    --enable-encoder=pcm_s16be_planar
+    --enable-encoder=pcm_s16le
+    --enable-encoder=pcm_s16le_planar
+    --enable-encoder=pcm_s24be
+    --enable-encoder=pcm_s24be_planar
+    --enable-encoder=pcm_s24daud
+    --enable-encoder=pcm_s24le
+    --enable-encoder=pcm_s24le_planar
+    --enable-encoder=pcm_s32be
+    --enable-encoder=pcm_s32be_planar
+    --enable-encoder=pcm_s32le
+    --enable-encoder=pcm_s32le_planar
+    --enable-encoder=pcm_s64be
+    --enable-encoder=pcm_s64le
+    --enable-encoder=pcm_u8
+    --enable-encoder=pcm_u16be
+    --enable-encoder=pcm_u16le
+    --enable-encoder=pcm_u24be
+    --enable-encoder=pcm_u24le
+    --enable-encoder=pcm_u32be
+    --enable-encoder=pcm_u32le
 )

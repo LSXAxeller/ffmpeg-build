@@ -1,0 +1,91 @@
+﻿name: Build C# Wrapper
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - platform: win-x64
+            os: ubuntu-22.04
+            ffmpeg-script: ./build-windows.sh
+            ffmpeg-env-name: ARCH
+            ffmpeg-env-value: x86_64
+            ffmpeg-artifact-dir: ffmpeg-8.0-audio-x86_64-w64-mingw32
+            compiler: x86_64-w64-mingw32-gcc
+            output-name: soundflow_ffmpeg.dll
+            linker-flags: '-static -lbcrypt -lsecur32 -lws2_32 -liphlpapi'
+          - platform: linux-x64
+            os: ubuntu-22.04
+            ffmpeg-script: ./build-linux.sh
+            ffmpeg-env-name: ARCH
+            ffmpeg-env-value: x86_64
+            ffmpeg-artifact-dir: ffmpeg-8.0-audio-x86_64-linux-gnu
+            compiler: gcc
+            output-name: soundflow_ffmpeg.so
+            linker-flags: '-fPIC -lm'
+          - platform: osx-x64
+            os: macos-latest
+            ffmpeg-script: ./build-macos.sh
+            ffmpeg-env-name: TARGET
+            ffmpeg-env-value: x86_64-apple-macos10.9
+            ffmpeg-artifact-dir: ffmpeg-8.0-audio-x86_64-apple-macos10.9
+            compiler: clang
+            output-name: soundflow_ffmpeg.dylib
+            linker-flags: '-framework CoreFoundation -framework Security'
+          - platform: osx-arm64
+            os: macos-latest
+            ffmpeg-script: ./build-macos.sh
+            ffmpeg-env-name: TARGET
+            ffmpeg-env-value: arm64-apple-macos11
+            ffmpeg-artifact-dir: ffmpeg-8.0-audio-arm64-apple-macos11
+            compiler: clang
+            output-name: soundflow_ffmpeg.dylib
+            linker-flags: '-framework CoreFoundation -framework Security -target arm64-apple-macos11'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies (Linux/Windows)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y nasm mingw-w64
+
+      - name: Install Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install nasm
+
+      - name: Build Static FFmpeg
+        run: ${{ matrix.ffmpeg-script }}
+        env:
+          ${{ matrix.ffmpeg-env-name }}: ${{ matrix.ffmpeg-env-value }}
+
+      - name: Build C++ Wrapper
+        run: |
+          # Define paths for clarity
+          FFMPEG_INCLUDE_PATH="artifacts/${{ matrix.ffmpeg-artifact-dir }}/include"
+          FFMPEG_LIB_PATH="artifacts/${{ matrix.ffmpeg-artifact-dir }}/lib"
+          OUTPUT_DIR="build"
+          mkdir -p $OUTPUT_DIR
+
+          # The compile command
+          ${{ matrix.compiler }} \
+            -shared \
+            -o "$OUTPUT_DIR/${{ matrix.output-name }}" \
+            wrapper_src/soundflow_ffmpeg.c \
+            -I"$FFMPEG_INCLUDE_PATH" \
+            -L"$FFMPEG_LIB_PATH" \
+            -lavformat -lavcodec -lswresample -lavutil \
+            ${{ matrix.linker-flags }}
+
+      - name: Upload Wrapper Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wrapper-${{ matrix.platform }}
+          path: build/${{ matrix.output-name }}
