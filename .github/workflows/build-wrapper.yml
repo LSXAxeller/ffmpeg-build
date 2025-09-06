@@ -28,7 +28,7 @@ jobs:
             compiler: gcc
             output-name: soundflow_ffmpeg.so
             compiler-flags: '-fPIC'
-            linker-flags: '-lm'
+            linker-flags: '-Wl,--start-group -lavformat -lavcodec -lswresample -lavutil -Wl,--end-group -lm -lpthread'
           - platform: osx-x64
             os: macos-latest
             ffmpeg-script: ./build-macos.sh
