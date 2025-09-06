@@ -16,12 +16,13 @@ fi
 
 OUTPUT_DIR=artifacts/ffmpeg-$FFMPEG_VERSION-audio-$ARCH-linux-gnu
 
+export CFLAGS="-fPIC"
+
 case $ARCH in
     x86_64)
-        FFMPEG_CONFIGURE_FLAGS+=(--extra-cflags='-fPIC')
         ;;
     i686)
-        FFMPEG_CONFIGURE_FLAGS+=(--cc="gcc -m32" --extra-cflags='-fPIC')
+        FFMPEG_CONFIGURE_FLAGS+=(--cc="gcc -m32")
         ;;
     arm64)
         FFMPEG_CONFIGURE_FLAGS+=(
@@ -29,7 +30,6 @@ case $ARCH in
             --cross-prefix=aarch64-linux-gnu-
             --target-os=linux
             --arch=aarch64
-            --extra-cflags='-fPIC'
         )
         ;;
     arm*)
@@ -39,34 +39,20 @@ case $ARCH in
             --target-os=linux
             --arch=arm
         )
-        base_cflags='-fPIC'
         case $ARCH in
             armv7-a)
-                FFMPEG_CONFIGURE_FLAGS+=(
-                    --cpu=armv7-a
-                    --extra-cflags="$base_cflags"
-                )
+                FFMPEG_CONFIGURE_FLAGS+=(--cpu=armv7-a)
                 ;;
             armv8-a)
-                FFMPEG_CONFIGURE_FLAGS+=(
-                    --cpu=armv8-a
-                    --extra-cflags="$base_cflags"
-                )
+                FFMPEG_CONFIGURE_FLAGS+=(--cpu=armv8-a)
                 ;;
             armhf-rpi2)
-                FFMPEG_CONFIGURE_FLAGS+=(
-                    --cpu=cortex-a7
-                    --extra-cflags='-fPIC -mcpu=cortex-a7 -mfloat-abi=hard -mfpu=neon-vfpv4 -mvectorize-with-neon-quad'
-                )
+                export CFLAGS="$CFLAGS -mcpu=cortex-a7 -mfloat-abi=hard -mfpu=neon-vfpv4 -mvectorize-with-neon-quad"
+                FFMPEG_CONFIGURE_FLAGS+=(--cpu=cortex-a7)
                 ;;
             armhf-rpi3)
-                FFMPEG_CONFIGURE_FLAGS+=(
-                    --cpu=cortex-a53
-                    --extra-cflags='-fPIC -mcpu=cortex-a53 -mfloat-abi=hard -mfpu=neon-fp-armv8 -mvectorize-with-neon-quad'
-                )
-                ;;
-            *)
-                FFMPEG_CONFIGURE_FLAGS+=(--extra-cflags="$base_cflags")
+                export CFLAGS="$CFLAGS -mcpu=cortex-a53 -mfloat-abi=hard -mfpu=neon-fp-armv8 -mvectorize-with-neon-quad"
+                FFMPEG_CONFIGURE_FLAGS+=(--cpu=cortex-a53)
                 ;;
         esac
         ;;
@@ -84,11 +70,9 @@ tar --strip-components=1 -xf $BASE_DIR/$FFMPEG_TARBALL
 
 FFMPEG_CONFIGURE_FLAGS+=(--prefix=$BASE_DIR/$OUTPUT_DIR)
 
-echo "Configure flags: ${FFMPEG_CONFIGURE_FLAGS[@]}"
-
 ./configure "${FFMPEG_CONFIGURE_FLAGS[@]}" || (cat ffbuild/config.log && exit 1)
 
-make
+make V=1
 make install
 
 chown $(stat -c '%u:%g' $BASE_DIR) -R $BASE_DIR/$OUTPUT_DIR
