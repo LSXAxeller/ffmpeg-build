@@ -36,7 +36,7 @@ jobs:
             ffmpeg-artifact-dir: ffmpeg-8.0-audio-x86_64-apple-macos10.9
             compiler: clang
             output-name: soundflow_ffmpeg.dylib
-            linker-flags: '-framework CoreFoundation -framework Security'
+            linker-flags: '-framework CoreFoundation -framework Security -target x86_64-apple-macos10.9'
           - platform: osx-arm64
             os: macos-latest
             ffmpeg-script: ./build-macos.sh
