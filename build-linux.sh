@@ -16,6 +16,8 @@ fi
 
 OUTPUT_DIR=artifacts/ffmpeg-$FFMPEG_VERSION-audio-$ARCH-linux-gnu
 
+FFMPEG_CONFIGURE_FLAGS+=(--extra-cflags='-fPIC')
+
 case $ARCH in
     x86_64)
         ;;

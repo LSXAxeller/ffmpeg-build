@@ -27,7 +27,8 @@ jobs:
             ffmpeg-artifact-dir: ffmpeg-8.0-audio-x86_64-linux-gnu
             compiler: gcc
             output-name: soundflow_ffmpeg.so
-            linker-flags: '-fPIC -lm'
+            compiler-flags: '-fPIC'
+            linker-flags: '-lm'
           - platform: osx-x64
             os: macos-latest
             ffmpeg-script: ./build-macos.sh
@@ -77,6 +78,7 @@ jobs:
           # The compile command
           ${{ matrix.compiler }} \
             -shared \
+            ${{ matrix.compiler-flags }} \
             -o "$OUTPUT_DIR/${{ matrix.output-name }}" \
             wrapper_src/soundflow_ffmpeg.c \
             -I"$FFMPEG_INCLUDE_PATH" \
