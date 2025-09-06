@@ -93,9 +93,9 @@ static int64_t seek_callback_wrapper(void* opaque, int64_t offset, int whence) {
     return decoder->onSeek(decoder->pUserData, offset, whence);
 }
 
-static int write_packet_callback(void* opaque, uint8_t* buf, int buf_size) {
+static int write_packet_callback(void* opaque, const uint8_t* buf, int buf_size) {
     SF_Encoder* encoder = (SF_Encoder*)opaque;
-    return (int)encoder->onWrite(encoder->pUserData, buf, buf_size);
+    return (int)encoder->onWrite(encoder->pUserData, (void*)buf, buf_size);
 }
 
 
@@ -166,11 +166,11 @@ SF_FFMPEG_API int64_t sf_decoder_get_length_in_pcm_frames(SF_Decoder* decoder) {
     if (!decoder || !decoder->format_ctx || decoder->stream_index < 0) return 0;
     AVStream* stream = decoder->format_ctx->streams[decoder->stream_index];
     if (stream->duration != AV_NOPTS_VALUE) {
-        return av_rescale_q(stream->duration, stream->time_base, (AVRational){1, stream->sample_rate});
+        return av_rescale_q(stream->duration, stream->time_base, (AVRational){1, stream->codecpar->sample_rate});
     }
     // Fallback for formats without duration info (e.g. WAV)
     if (decoder->format_ctx->duration != AV_NOPTS_VALUE) {
-        return av_rescale(decoder->format_ctx->duration, AV_TIME_BASE, stream->sample_rate);
+        return av_rescale(decoder->format_ctx->duration, AV_TIME_BASE, stream->codecpar->sample_rate);
     }
     return 0;
 }
@@ -212,8 +212,7 @@ SF_FFMPEG_API int64_t sf_decoder_read_pcm_frames(SF_Decoder* decoder, void* pFra
 SF_FFMPEG_API int sf_decoder_seek_to_pcm_frame(SF_Decoder* decoder, int64_t frameIndex) {
     if (!decoder || !decoder->format_ctx || decoder->stream_index < 0) return -1;
     AVStream* stream = decoder->format_ctx->streams[decoder->stream_index];
-    int64_t timestamp = av_rescale_q(frameIndex, (AVRational){1, stream->sample_rate}, stream->time_base);
-    // Flush internal buffers before seeking
+    int64_t timestamp = av_rescale_q(frameIndex, (AVRational){1, stream->codecpar->sample_rate}, stream->time_base);
     avcodec_flush_buffers(decoder->codec_ctx);
     return av_seek_frame(decoder->format_ctx, decoder->stream_index, timestamp, AVSEEK_FLAG_BACKWARD);
 }
@@ -287,17 +286,27 @@ SF_FFMPEG_API int sf_encoder_init(SF_Encoder* encoder, const char* format_name, 
     // Set parameters
     encoder->codec_ctx->channels = channels;
     AVChannelLayout ch_layout = AV_CHANNEL_LAYOUT_STEREO;
-    if (channels == 1) ch_layout = AV_CHANNEL_LAYOUT_MONO;
+    if (channels == 1) {
+        ch_layout = (AVChannelLayout)AV_CHANNEL_LAYOUT_MONO;
+    } else {
+        av_channel_layout_default(&ch_layout, channels);
+    }
     av_channel_layout_copy(&encoder->codec_ctx->ch_layout, &ch_layout);
     encoder->codec_ctx->sample_rate = sampleRate;
     encoder->codec_ctx->time_base = (AVRational){1, sampleRate};
+
+    // Suppress deprecation warnings for sample_fmts for compatibility.
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
     // Choose the best sample format the encoder supports
     if (codec->sample_fmts) {
         encoder->codec_ctx->sample_fmt = codec->sample_fmts[0];
     } else {
+        #pragma GCC diagnostic pop
         return -4; // Encoder supports no sample formats
     }
+    #pragma GCC diagnostic pop
 
     if (encoder->format_ctx->oformat->flags & AVFMT_GLOBALHEADER)
         encoder->codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
@@ -306,7 +315,7 @@ SF_FFMPEG_API int sf_encoder_init(SF_Encoder* encoder, const char* format_name, 
     if (avcodec_parameters_from_context(encoder->stream->codecpar, encoder->codec_ctx) < 0) return -6;
 
     encoder->io_buffer = (uint8_t*)av_malloc(IO_BUFFER_SIZE);
-    encoder->avio_ctx = avio_alloc_context(encoder->io_buffer, IO_BUFFER_SIZE, 1, encoder, NULL, write_packet_callback, NULL);
+    avio_alloc_context(encoder->io_buffer, IO_BUFFER_SIZE, 1, encoder, NULL, (int (*)(void*, const uint8_t*, int)) write_packet_callback, NULL);
     encoder->format_ctx->pb = encoder->avio_ctx;
 
     if (avformat_write_header(encoder->format_ctx, NULL) < 0) return -7;
@@ -330,7 +339,7 @@ SF_FFMPEG_API int sf_encoder_init(SF_Encoder* encoder, const char* format_name, 
 SF_FFMPEG_API int64_t sf_encoder_write_pcm_frames(SF_Encoder* encoder, void* pFramesIn, int64_t frameCount) {
     AVFrame* resampled_frame = av_frame_alloc();
     resampled_frame->format = encoder->codec_ctx->sample_fmt;
-    resampled_frame->ch_layout = encoder->codec_ctx->ch_layout;
+    av_channel_layout_copy(&resampled_frame->ch_layout, &encoder->codec_ctx->ch_layout);
     resampled_frame->sample_rate = encoder->codec_ctx->sample_rate;
     resampled_frame->nb_samples = (int)frameCount;
     if (av_frame_get_buffer(resampled_frame, 0) < 0) {
