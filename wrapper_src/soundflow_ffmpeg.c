@@ -1,6 +1,6 @@
 #include "soundflow_ffmpeg.h"
 
-#include <libavcodec/avcodec.hh>
+#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/opt.h>
 #include <libavutil/channel_layout.h>
