@@ -1,0 +1,260 @@
+name: Build FFmpeg for All Platforms
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows
+          - os: windows-latest
+            rid: win-x64
+            platform: Windows
+            arch: x86_64
+            toolchain: "Visual Studio 17 2022"
+
+          - os: windows-latest
+            rid: win-x86
+            platform: Windows
+            arch: x86
+            toolchain: "Visual Studio 17 2022"
+
+          - os: windows-latest
+            rid: win-arm64
+            platform: Windows
+            arch: aarch64
+            toolchain: "Visual Studio 17 2022"
+
+          # Linux
+          - os: ubuntu-22.04
+            rid: linux-x64
+            platform: Linux
+            arch: x86_64
+
+          - os: ubuntu-22.04
+            rid: linux-arm
+            platform: Linux
+            arch: arm
+
+          - os: ubuntu-22.04
+            rid: linux-arm64
+            platform: Linux
+            arch: aarch64
+
+          # macOS
+          - os: macos-14
+            rid: osx-x64
+            platform: macOS
+            arch: x86_64
+
+          - os: macos-14
+            rid: osx-arm64
+            platform: macOS
+            arch: aarch64
+
+          # Android
+          - os: ubuntu-22.04
+            rid: android-arm
+            platform: Android
+            arch: arm
+
+          - os: ubuntu-22.04
+            rid: android-arm64
+            platform: Android
+            arch: aarch64
+
+          - os: ubuntu-22.04
+            rid: android-x64
+            platform: Android
+            arch: x86_64
+
+          # iOS
+          - os: macos-14
+            rid: ios-arm64
+            platform: iOS
+            arch: aarch64
+
+    name: Build FFmpeg for ${{ matrix.platform }} - ${{ matrix.arch }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          if [ "${{ matrix.platform }}" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y cmake build-essential ninja-build
+            if [ "${{ matrix.arch }}" = "arm" ]; then
+              sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+            elif [ "${{ matrix.arch }}" = "aarch64" ]; then
+              sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+            fi
+          elif [ "${{ matrix.platform }}" = "Android" ]; then
+            sudo apt-get update
+            sudo apt-get install -y cmake ninja-build
+          elif [ "${{ matrix.platform }}" = "Windows" ]; then
+            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+            choco install ninja -y
+          fi
+
+      - name: Setup Android NDK (Android only)
+        if: matrix.platform == 'Android'
+        uses: android-actions/setup-android@v3
+
+      - name: Configure CMake
+        run: |
+          mkdir build && cd build
+          if [ "${{ matrix.platform }}" = "Windows" ]; then
+            cmake .. -G "${{ matrix.toolchain }}" -A ${{ matrix.arch }} -DCMAKE_BUILD_TYPE=Release
+          elif [ "${{ matrix.platform }}" = "iOS" ]; then
+            cmake .. -G Xcode \
+              -DCMAKE_SYSTEM_NAME=iOS \
+              -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} \
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          elif [ "${{ matrix.platform }}" = "Android" ]; then
+            cmake .. -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
+              -DANDROID_ABI=${{ matrix.arch }} \
+              -DANDROID_PLATFORM=android-21
+          else
+            cmake .. -DCMAKE_BUILD_TYPE=Release
+          fi
+
+      - name: Build FFmpeg
+        run: |
+          cd build
+          if [ "${{ matrix.platform }}" = "iOS" ]; then
+            xcodebuild -project *.xcodeproj -configuration Release -sdk iphoneos
+          else
+            cmake --build . --config Release --target package_ffmpeg -j$(nproc)
+          fi
+
+      - name: Package Artifacts
+        run: |
+          mkdir -p artifacts/${{ matrix.rid }}
+          cp -r build/runtimes/${{ matrix.rid }}/native/* artifacts/${{ matrix.rid }}/
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-${{ matrix.rid }}
+          path: artifacts/${{ matrix.rid }}
+
+  build-freebsd:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - rid: freebsd-x64
+            arch: x86_64
+          - rid: freebsd-arm64
+            arch: aarch64
+
+    name: Build FFmpeg for FreeBSD - ${{ matrix.arch }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build on FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.2"
+          arch: "${{ matrix.arch }}"
+          usesh: true
+          prepare: |
+            pkg install -y cmake gcc gmake bash
+          run: |
+            set -ex
+            cd $GITHUB_WORKSPACE
+            mkdir build && cd build
+            cmake .. -DCMAKE_BUILD_TYPE=Release
+            cmake --build . --config Release --target package_ffmpeg -j$(nproc)
+
+      - name: Package FreeBSD Artifacts
+        run: |
+          mkdir -p artifacts/${{ matrix.rid }}
+          cp -r $GITHUB_WORKSPACE/build/runtimes/freebsd-${{ matrix.arch }}/native/* artifacts/${{ matrix.rid }}/
+
+      - name: Upload FreeBSD Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-${{ matrix.rid }}
+          path: artifacts/${{ matrix.rid }}
+
+  package-all:
+    runs-on: ubuntu-latest
+    needs: [build, build-freebsd]
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create final package
+        run: |
+          mkdir -p package/runtimes
+          # Organize artifacts into .NET-style runtime folders
+          for artifact in artifacts/*; do
+            rid=$(basename $artifact | sed 's/ffmpeg-//')
+            mkdir -p package/runtimes/$rid/native
+            cp -r $artifact/* package/runtimes/$rid/native/
+          done
+          
+          # Create zip package
+          cd package
+          zip -r ../ffmpeg-native.zip runtimes
+
+      - name: Upload final package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-native-package
+          path: ffmpeg-native.zip
+
+      - name: Create NuGet structure
+        run: |
+          mkdir -p nupkg/build
+          mkdir -p nupkg/runtimes
+          
+          # Copy all runtime assets
+          cp -r package/runtimes/* nupkg/runtimes/
+          
+          # Create targets file for NuGet
+          cat > nupkg/build/SoundFlow.FFmpeg.Native.targets << 'EOF'
+          <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+            <ItemGroup>
+              <None Include="$(MSBuildThisFileDirectory)../runtimes/$(RuntimeIdentifier)/native/*">
+                <Link>%(FileName)%(Extension)</Link>
+                <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+              </None>
+            </ItemGroup>
+          </Project>
+          EOF
+          
+          # Create nuspec file
+          cat > nupkg/SoundFlow.FFmpeg.Native.nuspec << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+            <metadata>
+              <id>SoundFlow.FFmpeg.Native</id>
+              <version>1.0.0</version>
+              <authors>SoundFlow</authors>
+              <description>Native FFmpeg libraries for multiple platforms</description>
+              <contentFiles>
+                <files include="any/any/SoundFlow.FFmpeg.Native.targets" buildAction="None" />
+              </contentFiles>
+            </metadata>
+            <files>
+              <file src="build\SoundFlow.FFmpeg.Native.targets" target="build" />
+              <file src="runtimes\**" target="runtimes" />
+            </files>
+          </package>
+          EOF
+
+      - name: Upload NuGet package structure
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-nuget-package
+          path: nupkg

@@ -109,6 +109,10 @@ SF_FFMPEG_API int sf_decoder_init(SF_Decoder* decoder, sf_read_callback onRead, 
                                  SFSampleFormat target_format, SFSampleFormat* out_native_format,
                                  uint32_t* out_channels, uint32_t* out_samplerate) {
     if (!decoder) return -1;
+
+    // Set FFmpeg to only log errors
+    av_log_set_level(AV_LOG_ERROR);
+
     decoder->onRead = onRead;
     decoder->onSeek = onSeek;
     decoder->pUserData = pUserData;
@@ -122,11 +126,24 @@ SF_FFMPEG_API int sf_decoder_init(SF_Decoder* decoder, sf_read_callback onRead, 
     if (!decoder->avio_ctx) { av_free(decoder->io_buffer); avformat_free_context(decoder->format_ctx); return -1; }
     decoder->format_ctx->pb = decoder->avio_ctx;
 
-    if (avformat_open_input(&decoder->format_ctx, NULL, NULL, NULL) != 0) return -2;
+    // Add format context options to ignore non-audio streams
+    AVDictionary* options = NULL;
+    av_dict_set(&options, "scan_all_pmts", "0", 0);
+    av_dict_set(&options, "probesize", "5000000", 0);
+    av_dict_set(&options, "analyzeduration", "10000000", 0);
+
+    if (avformat_open_input(&decoder->format_ctx, NULL, NULL, &options) != 0) return -2;
     if (avformat_find_stream_info(decoder->format_ctx, NULL) < 0) return -3;
 
     decoder->stream_index = av_find_best_stream(decoder->format_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
     if (decoder->stream_index < 0) return -4;
+
+    // Ignore all non-audio streams
+    for (unsigned int i = 0; i < decoder->format_ctx->nb_streams; i++) {
+        if (i != decoder->stream_index) {
+            decoder->format_ctx->streams[i]->discard = AVDISCARD_ALL;
+        }
+    }
 
     AVStream* stream = decoder->format_ctx->streams[decoder->stream_index];
     const AVCodec* codec = avcodec_find_decoder(stream->codecpar->codec_id);
@@ -176,14 +193,27 @@ SF_FFMPEG_API int64_t sf_decoder_get_length_in_pcm_frames(SF_Decoder* decoder) {
 }
 
 SF_FFMPEG_API int64_t sf_decoder_read_pcm_frames(SF_Decoder* decoder, void* pFramesOut, int64_t frameCount) {
+    if (!decoder || !pFramesOut || frameCount <= 0) return 0;
+
     uint8_t* out_ptr[] = { (uint8_t*)pFramesOut };
     int64_t frames_read = 0;
+    int draining = 0;
+    int got_output = 0;
 
     while (frames_read < frameCount) {
+        // Try to receive a decoded frame
         int ret = avcodec_receive_frame(decoder->codec_ctx, decoder->frame);
-        if (ret == 0) { // Success, we have a frame
-            int64_t frames_to_convert = frameCount - frames_read;
-            int out_samples = swr_convert(decoder->swr_ctx, out_ptr, (int)frames_to_convert, (const uint8_t**)decoder->frame->data, decoder->frame->nb_samples);
+
+        if (ret == 0) {
+            got_output = 1;
+
+            // Resample the frame to target format
+            int out_samples = swr_convert(decoder->swr_ctx,
+                                         out_ptr,
+                                         (int)(frameCount - frames_read),
+                                         (const uint8_t**)decoder->frame->data,
+                                         decoder->frame->nb_samples);
+
             if (out_samples > 0) {
                 out_ptr[0] += out_samples * decoder->target_channels * decoder->target_bytes_per_sample;
                 frames_read += out_samples;
@@ -191,30 +221,93 @@ SF_FFMPEG_API int64_t sf_decoder_read_pcm_frames(SF_Decoder* decoder, void* pFra
             av_frame_unref(decoder->frame);
             continue;
         }
+        else if (ret == AVERROR_EOF) {
+            // Drain the resampler completely
+            int flushed_samples;
+            do {
+                flushed_samples = swr_convert(decoder->swr_ctx,
+                                             out_ptr,
+                                             (int)(frameCount - frames_read),
+                                             NULL, 0);
+                if (flushed_samples > 0) {
+                    out_ptr[0] += flushed_samples * decoder->target_channels * decoder->target_bytes_per_sample;
+                    frames_read += flushed_samples;
+                    got_output = 1;
+                }
+            } while (flushed_samples > 0 && frames_read < frameCount);
 
-        if (ret == AVERROR(EAGAIN)) { // Need more data
-            av_packet_unref(decoder->packet);
-            if (av_read_frame(decoder->format_ctx, decoder->packet) != 0) {
-                avcodec_send_packet(decoder->codec_ctx, NULL); // Flush decoder
-                continue;
+            // Only break if we've truly drained everything
+            if (frames_read > 0 || !got_output) {
+                break;
             }
-            if (decoder->packet->stream_index == decoder->stream_index) {
-                if (avcodec_send_packet(decoder->codec_ctx, decoder->packet) != 0) break;
-            }
-            av_packet_unref(decoder->packet);
-            continue;
         }
-        break; // EOF or an error, break the loop
+        else if (ret != AVERROR(EAGAIN)) {
+            // Real error occurred
+            break;
+        }
+
+        // If we need more input data
+        if (ret == AVERROR(EAGAIN)) {
+            if (draining) {
+                // Should not happen when draining
+                break;
+            }
+
+            // Read new packet
+            av_packet_unref(decoder->packet);
+            int read_ret = av_read_frame(decoder->format_ctx, decoder->packet);
+
+            if (read_ret == 0) {
+                if (decoder->packet->stream_index == decoder->stream_index) {
+                    if (avcodec_send_packet(decoder->codec_ctx, decoder->packet) < 0) {
+                        av_packet_unref(decoder->packet);
+                        break;
+                    }
+                }
+                av_packet_unref(decoder->packet);
+            }
+            else if (read_ret == AVERROR_EOF) {
+                // Start draining process
+                avcodec_send_packet(decoder->codec_ctx, NULL);
+                draining = 1;
+            }
+            else {
+                // Read error
+                break;
+            }
+        }
     }
+
     return frames_read;
 }
 
 SF_FFMPEG_API int sf_decoder_seek_to_pcm_frame(SF_Decoder* decoder, int64_t frameIndex) {
     if (!decoder || !decoder->format_ctx || decoder->stream_index < 0) return -1;
+
     AVStream* stream = decoder->format_ctx->streams[decoder->stream_index];
     int64_t timestamp = av_rescale_q(frameIndex, (AVRational){1, stream->codecpar->sample_rate}, stream->time_base);
+
+    // Flush buffers and seek
     avcodec_flush_buffers(decoder->codec_ctx);
-    return av_seek_frame(decoder->format_ctx, decoder->stream_index, timestamp, AVSEEK_FLAG_BACKWARD);
+    swr_init(decoder->swr_ctx);  // Reset resampler state
+
+    int ret = av_seek_frame(decoder->format_ctx, decoder->stream_index, timestamp, AVSEEK_FLAG_BACKWARD);
+    if (ret < 0) {
+        return ret;
+    }
+
+    // Read and discard packets until we reach the desired position
+    AVPacket* pkt = av_packet_alloc();
+    while (av_read_frame(decoder->format_ctx, pkt) >= 0) {
+        if (pkt->stream_index == decoder->stream_index) {
+            av_packet_unref(pkt);
+            break;
+        }
+        av_packet_unref(pkt);
+    }
+    av_packet_free(&pkt);
+
+    return 0;
 }
 
 SF_FFMPEG_API void sf_decoder_free(SF_Decoder* decoder) {
@@ -264,6 +357,10 @@ static int encode_and_write(SF_Encoder* encoder, AVFrame* frame) {
 
 SF_FFMPEG_API int sf_encoder_init(SF_Encoder* encoder, const char* format_name, sf_write_callback onWrite, void* pUserData, SFSampleFormat sampleFormat, uint32_t channels, uint32_t sampleRate) {
     if (!encoder) return -1;
+
+    // Set FFmpeg to only log errors
+    av_log_set_level(AV_LOG_ERROR);
+
     encoder->onWrite = onWrite;
     encoder->pUserData = pUserData;
     encoder->next_pts = 0;
