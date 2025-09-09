@@ -4,326 +4,257 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Windows builds
   build-windows:
-    runs-on: windows-latest
     strategy:
       matrix:
-        arch: [x64, x86, arm64]
-
+        include:
+          - arch: x64
+            msystem: MINGW64
+            mingw-package-prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            mingw-package-prefix: mingw-w64-i686
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
+      - uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: ${{ matrix.msystem }}
           update: true
           install: >-
+            ${{ matrix.mingw-package-prefix }}-gcc
+            ${{ matrix.mingw-package-prefix }}-cmake
+            ${{ matrix.mingw-package-prefix }}-ninja
+            ${{ matrix.mingw-package-prefix }}-make
+            ${{ matrix.mingw-package-prefix }}-pkg-config
             base-devel
-            mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-ninja
-            mingw-w64-i686-toolchain
-            mingw-w64-i686-cmake
-            mingw-w64-clang-aarch64-toolchain
             git
-            make
-            autoconf
-            automake
-            pkg-config
             nasm
             yasm
 
-      - name: Create build directory
-        shell: msys2 {0}
-        run: mkdir -p build
-
-      - name: Configure CMake (x64)
-        if: matrix.arch == 'x64'
-        shell: msys2 {0}
+      - name: Configure and Build
         run: |
+          mkdir build
           cd build
-          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_SYSTEM_PROCESSOR=x86_64
+          cmake .. -G "MinGW Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }}
+          cmake --build . --parallel $(nproc) --verbose
 
-      - name: Configure CMake (x86)
-        if: matrix.arch == 'x86'
-        shell: msys2 {0}
-        run: |
-          cd build
-          export PATH="/mingw32/bin:$PATH"
-          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_SYSTEM_PROCESSOR=i686 \
-            -DCMAKE_C_COMPILER=i686-w64-mingw32-gcc
-
-      - name: Configure CMake (ARM64)
-        if: matrix.arch == 'arm64'
-        shell: msys2 {0}
-        run: |
-          cd build
-          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-            -DCMAKE_CROSSCOMPILING=ON \
-            -DCMAKE_C_COMPILER=aarch64-w64-mingw32-gcc
-
-      - name: Build
-        shell: msys2 {0}
-        run: |
-          cd build
-          cmake --build . --verbose -j$(nproc)
-
-      - name: Upload Windows Artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-${{ matrix.arch }}
-          path: build/runtimes/win-${{ matrix.arch }}/native/
+          name: soundflow-ffmpeg-win-${{ matrix.arch }}
+          path: build/runtimes/win-${{ matrix.arch }}/native/*
 
+  # Linux builds
   build-linux:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [x64, arm64]
-
+        include:
+          - arch: x64
+            os: ubuntu-latest
+          - arch: arm64
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install native dependencies
+        if: matrix.arch == 'x64'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build \
-            pkg-config nasm yasm autoconf automake libtool
+          sudo apt-get install -y build-essential cmake nasm yasm pkg-config
 
-      - name: Install cross-compilation tools (ARM64)
+      - name: Setup ARM64 cross-compilation
         if: matrix.arch == 'arm64'
         run: |
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            build-essential cmake nasm yasm pkg-config
 
-      - name: Create build directory
-        run: mkdir -p build
-
-      - name: Configure CMake (x64)
+      - name: Configure and Build (x64)
         if: matrix.arch == 'x64'
         run: |
+          mkdir build
           cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_SYSTEM_PROCESSOR=x86_64
+          cmake --build . --parallel $(nproc) --verbose
 
-      - name: Configure CMake (ARM64)
+      - name: Configure and Build (ARM64)
         if: matrix.arch == 'arm64'
         run: |
+          mkdir build
           cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=Linux \
             -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-            -DCMAKE_CROSSCOMPILING=ON \
             -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
-            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+            -DCMAKE_FIND_ROOT_PATH=/usr/aarch64-linux-gnu \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY
+          cmake --build . --parallel $(nproc) --verbose
 
-      - name: Build
-        run: |
-          cd build
-          cmake --build . --verbose -j$(nproc)
-
-      - name: Upload Linux Artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-${{ matrix.arch }}
-          path: build/runtimes/linux-${{ matrix.arch }}/native/
+          name: soundflow-ffmpeg-linux-${{ matrix.arch }}
+          path: build/runtimes/linux-${{ matrix.arch }}/native/*
 
+  # macOS builds
   build-macos:
-    runs-on: macos-latest
     strategy:
       matrix:
-        arch: [x64, arm64]
-
+        include:
+          - arch: x64
+            os: macos-13  # Intel
+          - arch: arm64
+            os: macos-14  # Apple Silicon
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
-          brew install cmake ninja pkg-config nasm yasm autoconf automake libtool
+          brew install cmake nasm yasm pkg-config
 
-      - name: Create build directory
-        run: mkdir -p build
-
-      - name: Configure CMake (x64)
-        if: matrix.arch == 'x64'
+      - name: Configure and Build
         run: |
+          mkdir build
           cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
-            -DCMAKE_OSX_ARCHITECTURES=x86_64
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            cmake .. \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+              -DCMAKE_SYSTEM_PROCESSOR=x86_64
+          else
+            cmake .. \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_OSX_ARCHITECTURES=arm64 \
+              -DCMAKE_SYSTEM_PROCESSOR=arm64
+          fi
+          cmake --build . --parallel $(sysctl -n hw.ncpu) --verbose
 
-      - name: Configure CMake (ARM64)
-        if: matrix.arch == 'arm64'
-        run: |
-          cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_SYSTEM_PROCESSOR=arm64 \
-            -DCMAKE_OSX_ARCHITECTURES=arm64
-
-      - name: Build
-        run: |
-          cd build
-          cmake --build . --verbose -j$(sysctl -n hw.ncpu)
-
-      - name: Upload macOS Artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: osx-${{ matrix.arch }}
-          path: build/runtimes/osx-${{ matrix.arch }}/native/
+          name: soundflow-ffmpeg-osx-${{ matrix.arch }}
+          path: build/runtimes/osx-${{ matrix.arch }}/native/*
 
+  # Android builds
   build-android:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [arm, arm64, x64]
-
+        include:
+          - arch: x64
+            abi: x86_64
+          - arch: arm
+            abi: armeabi-v7a
+          - arch: arm64
+            abi: arm64-v8a
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
+        id: setup-ndk
         with:
-          ndk-version: r25c
-          add-to-path: false
+          ndk-version: r26b
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build \
-            pkg-config nasm yasm autoconf automake libtool
+          sudo apt-get install -y cmake nasm yasm pkg-config
 
-      - name: Create build directory
-        run: mkdir -p build
-
-      - name: Set Android variables
+      - name: Configure and Build
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
-          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
-          if [ "${{ matrix.arch }}" = "arm" ]; then
-            echo "ANDROID_ABI=armeabi-v7a" >> $GITHUB_ENV
-            echo "CMAKE_ANDROID_ARCH=arm" >> $GITHUB_ENV
-          elif [ "${{ matrix.arch }}" = "arm64" ]; then
-            echo "ANDROID_ABI=arm64-v8a" >> $GITHUB_ENV
-            echo "CMAKE_ANDROID_ARCH=arm64" >> $GITHUB_ENV
-          elif [ "${{ matrix.arch }}" = "x64" ]; then
-            echo "ANDROID_ABI=x86_64" >> $GITHUB_ENV
-            echo "CMAKE_ANDROID_ARCH=x86_64" >> $GITHUB_ENV
-          fi
-
-      - name: Configure CMake
-        run: |
+          mkdir build
           cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=$ANDROID_ABI \
-            -DANDROID_PLATFORM=android-21 \
-            -DCMAKE_ANDROID_ARCH_ABI=$ANDROID_ABI \
-            -DCMAKE_ANDROID_ARCH=$CMAKE_ANDROID_ARCH \
-            -DCMAKE_SYSTEM_NAME=Android
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DCMAKE_ANDROID_ARCH=${{ matrix.abi }} \
+            -DCMAKE_ANDROID_NDK=$ANDROID_NDK_ROOT \
+            -DCMAKE_ANDROID_STL_TYPE=c++_static \
+            -DCMAKE_ANDROID_API_MIN=21 \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake
+          cmake --build . --parallel $(nproc) --verbose
 
-      - name: Build
-        run: |
-          cd build
-          cmake --build . --verbose -j$(nproc)
-
-      - name: Upload Android Artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: android-${{ matrix.arch }}
-          path: build/runtimes/android-${{ matrix.arch }}/native/
+          name: soundflow-ffmpeg-android-${{ matrix.arch }}
+          path: build/runtimes/android-${{ matrix.arch }}/native/*
 
+  # FreeBSD build
   build-freebsd:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [x64]  # FreeBSD ARM64 cross-compilation is complex
-
+        arch: [x64]
     steps:
       - uses: actions/checkout@v4
 
       - name: Build in FreeBSD VM
-        uses: vmactions/freebsd-vm@v1
+        uses: cross-platform-actions/action@v0.26.0
         with:
-          usesh: true
-          mem: 4096
-          release: "14.0"
-          prepare: |
-            pkg install -y cmake ninja pkgconf nasm yasm autoconf automake libtool bash
-
+          operating_system: freebsd
+          version: '14.0'
+          architecture: x86_64
           run: |
-            mkdir -p build
+            sudo pkg install -y cmake gmake nasm yasm pkgconf
+            mkdir build
             cd build
-            cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            cmake .. \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_SYSTEM_NAME=FreeBSD \
               -DCMAKE_SYSTEM_PROCESSOR=x86_64
-            cmake --build . --verbose -j$(sysctl -n hw.ncpu)
+            cmake --build . --parallel $(sysctl -n hw.ncpu) --verbose
 
-      - name: Upload FreeBSD Artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: freebsd-${{ matrix.arch }}
-          path: build/runtimes/freebsd-${{ matrix.arch }}/native/
+          name: soundflow-ffmpeg-freebsd-${{ matrix.arch }}
+          path: build/runtimes/freebsd-${{ matrix.arch }}/native/*
 
+  # iOS build
   build-ios:
     runs-on: macos-latest
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
-          brew install cmake ninja pkg-config nasm yasm autoconf automake libtool
+          brew install cmake nasm yasm pkg-config
 
-      - name: Create build directory
-        run: mkdir -p build
-
-      - name: Configure CMake for iOS
+      - name: Configure and Build
         run: |
+          mkdir build
           cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+            -DIOS=1 \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_SYSTEM_PROCESSOR=arm64 \
-            -DIOS=ON
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DCMAKE_IOS_INSTALL_COMBINED=YES
+          cmake --build . --parallel $(sysctl -n hw.ncpu) --verbose
 
-      - name: Build
-        run: |
-          cd build
-          cmake --build . --verbose -j$(sysctl -n hw.ncpu)
-
-      - name: Upload iOS Artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ios-arm64
-          path: build/runtimes/ios-arm64/native/
-
-  # Combine all artifacts into a single package
-  package:
-    needs: [build-windows, build-linux, build-macos, build-android, build-freebsd]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create combined package structure
-        run: |
-          mkdir -p package/runtimes
-          
-          # Copy all runtime artifacts
-          for dir in artifacts/*/; do
-            if [ -d "$dir" ]; then
-              cp -r "$dir"* package/runtimes/ 2>/dev/null || true
-            fi
-          done
-          
-          # List the final structure
-          find package -type f -name "*" | sort
-
-      - name: Upload Combined Package
-        uses: actions/upload-artifact@v4
-        with:
-          name: soundflow-ffmpeg-all-platforms
-          path: package/
+          name: soundflow-ffmpeg-ios-arm64
+          path: build/runtimes/ios-arm64/native/*
