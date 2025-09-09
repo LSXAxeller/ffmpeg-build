@@ -1,4 +1,4 @@
-name: Build FFmpeg for All Platforms
+name: Build SoundFlow - FFMpeg Native Library
 
 on:
   workflow_dispatch:
@@ -13,100 +13,100 @@ jobs:
           # Windows
           - os: windows-latest
             rid: win-x64
-            platform: Windows
             arch: x86_64
-            cmake_arch: x64
-            toolchain: "Visual Studio 17 2022"
+            msys2_arch: mingw64
+            msys2_toolchain: mingw-w64-x86_64-toolchain
 
           - os: windows-latest
             rid: win-x86
-            platform: Windows
             arch: x86
-            cmake_arch: Win32
-            toolchain: "Visual Studio 17 2022"
+            msys2_arch: mingw32
+            msys2_toolchain: mingw-w64-i686-toolchain
 
-          - os: windows-latest
+          - os: ubuntu-22.04
             rid: win-arm64
-            platform: Windows
             arch: aarch64
-            cmake_arch: ARM64
-            toolchain: "Visual Studio 17 2022"
+            cross_compile: true
+            cross_prefix: aarch64-w64-mingw32-
 
           # Linux
           - os: ubuntu-22.04
             rid: linux-x64
-            platform: Linux
             arch: x86_64
 
           - os: ubuntu-22.04
             rid: linux-arm
-            platform: Linux
             arch: arm
+            cross_compile: true
+            cross_prefix: arm-linux-gnueabihf-
 
           - os: ubuntu-22.04
             rid: linux-arm64
-            platform: Linux
             arch: aarch64
+            cross_compile: true
+            cross_prefix: aarch64-linux-gnu-
 
           # macOS
           - os: macos-14
             rid: osx-x64
-            platform: macOS
             arch: x86_64
 
           - os: macos-14
             rid: osx-arm64
-            platform: macOS
-            arch: aarch64
+            arch: arm64
 
           # Android
           - os: ubuntu-22.04
             rid: android-arm
             platform: Android
-            arch: arm
             cmake_arch: armeabi-v7a
 
           - os: ubuntu-22.04
             rid: android-arm64
             platform: Android
-            arch: aarch64
             cmake_arch: arm64-v8a
 
           - os: ubuntu-22.04
             rid: android-x64
             platform: Android
-            arch: x86_64
             cmake_arch: x86_64
 
           # iOS
           - os: macos-14
             rid: ios-arm64
             platform: iOS
-            arch: aarch64
+            arch: arm64
 
-    name: Build FFmpeg for ${{ matrix.platform }} - ${{ matrix.arch }}
+    name: Build for ${{ matrix.rid }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Dependencies
-        shell: bash
+      - name: Setup MSYS2 (Windows Only)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msys2_arch }}
+          update: true
+          install: >-
+            git
+            make
+            cmake
+            ninja
+            bash
+            ${{ matrix.msys2_toolchain }}
+
+      - name: Install Cross-compilation Dependencies (Linux)
+        if: runner.os == 'Linux' && matrix.cross_compile == true
         run: |
-          if [ "${{ matrix.platform }}" = "Linux" ]; then
-            sudo apt-get update
-            sudo apt-get install -y cmake build-essential ninja-build
-            if [ "${{ matrix.arch }}" = "arm" ]; then
-              sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
-            elif [ "${{ matrix.arch }}" = "aarch64" ]; then
-              sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-            fi
-          elif [ "${{ matrix.platform }}" = "Android" ]; then
-            sudo apt-get update
-            sudo apt-get install -y cmake ninja-build
-          elif [ "${{ matrix.platform }}" = "Windows" ]; then
-            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
-            choco install ninja -y
-          fi
+          sudo apt-get update
+          sudo apt-get install -y gcc-${{ matrix.cross_prefix }} g++-${{ matrix.cross_prefix }}
+
+      - name: Install Linux Build Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build bash
 
       - name: Setup Android NDK (Android only)
         if: matrix.platform == 'Android'
@@ -115,64 +115,60 @@ jobs:
       - name: Configure CMake
         shell: bash
         run: |
+          # Set cross-compilation environment variables if needed
+          if [ "${{ matrix.cross_compile }}" = "true" ]; then
+            export CC=${{ matrix.cross_prefix }}gcc
+            export CXX=${{ matrix.cross_prefix }}g++
+          fi
+
           mkdir build && cd build
-          if [ "${{ matrix.platform }}" = "Windows" ]; then
-            cmake .. -G "${{ matrix.toolchain }}" -A ${{ matrix.cmake_arch }} -DCMAKE_BUILD_TYPE=Release
+
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            # We are inside the MSYS2 shell now
+            cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
           elif [ "${{ matrix.platform }}" = "iOS" ]; then
-            cmake .. -G Xcode \
+            cmake .. -G "Xcode" \
               -DCMAKE_SYSTEM_NAME=iOS \
               -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} \
               -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
           elif [ "${{ matrix.platform }}" = "Android" ]; then
-            cmake .. -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
+            cmake .. -G "Ninja" \
+              -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
               -DANDROID_ABI=${{ matrix.cmake_arch }} \
               -DANDROID_PLATFORM=android-21 \
               -DCMAKE_BUILD_TYPE=Release
           else
-            cmake .. -DCMAKE_BUILD_TYPE=Release
+            cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release
           fi
 
-      - name: Build FFmpeg
+      - name: Build
         shell: bash
         run: |
           cd build
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            CORES=$(nproc)
-          elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            CORES=$(sysctl -n hw.ncpu)
-          elif [[ "$RUNNER_OS" == "Windows" ]]; then
-            CORES=$NUMBER_OF_PROCESSORS
-          fi
-
           if [ "${{ matrix.platform }}" = "iOS" ]; then
-            xcodebuild -project *.xcodeproj -configuration Release -sdk iphoneos -target package_ffmpeg -jobs $CORES
+            cmake --build . --config Release --target package_all -j $(sysctl -n hw.ncpu)
           else
-            cmake --build . --config Release --target package_ffmpeg -j$CORES
+            cmake --build . --config Release --target package_all -j $(nproc 2>/dev/null || sysctl -n hw.ncpu)
           fi
-
-      - name: Package Artifacts
-        shell: bash
-        run: |
-          mkdir -p artifacts/${{ matrix.rid }}
-          cp -r build/runtimes/${{ matrix.rid }}/native/* artifacts/${{ matrix.rid }}/
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-${{ matrix.rid }}
-          path: artifacts/${{ matrix.rid }}
+          path: build/runtimes/${{ matrix.rid }}/native/
 
   build-freebsd:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - rid: freebsd-x64
-            arch: x86_64
+            arch: amd64
           - rid: freebsd-arm64
             arch: aarch64
 
-    name: Build FFmpeg for FreeBSD - ${{ matrix.arch }}
+    name: Build for ${{ matrix.rid }}
 
     steps:
       - uses: actions/checkout@v4
@@ -180,28 +176,23 @@ jobs:
       - name: Build on FreeBSD VM
         uses: vmactions/freebsd-vm@v1
         with:
-          release: "14.2"
+          release: "14.0" # Use a stable release
           arch: "${{ matrix.arch }}"
           usesh: true
           prepare: |
-            pkg install -y cmake gcc gmake bash
+            pkg install -y cmake gmake ninja bash
           run: |
             set -ex
             cd $GITHUB_WORKSPACE
             mkdir build && cd build
-            cmake .. -DCMAKE_BUILD_TYPE=Release
-            cmake --build . --config Release --target package_ffmpeg -j$(sysctl -n kern.smp.cpus)
-
-      - name: Package FreeBSD Artifacts
-        run: |
-          mkdir -p artifacts/${{ matrix.rid }}
-          cp -r $GITHUB_WORKSPACE/build/runtimes/freebsd-${{ matrix.arch }}/native/* artifacts/${{ matrix.rid }}/
+            cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+            cmake --build . --config Release --target package_all -j$(sysctl -n kern.smp.cpus)
 
       - name: Upload FreeBSD Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-${{ matrix.rid }}
-          path: artifacts/${{ matrix.rid }}
+          path: build/runtimes/${{ matrix.rid }}/native/
 
   package-all:
     runs-on: ubuntu-latest
@@ -211,69 +202,20 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: ffmpeg-*
+          merge-multiple: true
 
       - name: Create final package
         run: |
           mkdir -p package/runtimes
-          # Organize artifacts into .NET-style runtime folders
-          for artifact in artifacts/*; do
-            rid=$(basename $artifact | sed 's/ffmpeg-//')
-            mkdir -p package/runtimes/$rid/native
-            cp -r $artifact/* package/runtimes/$rid/native/
-          done
+          mv artifacts/* package/runtimes/
           
           # Create zip package
           cd package
-          zip -r ../ffmpeg-native.zip runtimes
+          zip -r ../ffmpeg-native.zip .
 
       - name: Upload final package
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-native-package
           path: ffmpeg-native.zip
-
-      - name: Create NuGet structure
-        run: |
-          mkdir -p nupkg/build
-          mkdir -p nupkg/runtimes
-          
-          # Copy all runtime assets
-          cp -r package/runtimes/* nupkg/runtimes/
-          
-          # Create targets file for NuGet
-          cat > nupkg/build/SoundFlow.FFmpeg.Native.targets << 'EOF'
-          <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-            <ItemGroup>
-              <None Include="$(MSBuildThisFileDirectory)../runtimes/$(RuntimeIdentifier)/native/*">
-                <Link>%(FileName)%(Extension)</Link>
-                <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-              </None>
-            </ItemGroup>
-          </Project>
-          EOF
-          
-          # Create nuspec file
-          cat > nupkg/SoundFlow.FFmpeg.Native.nuspec << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
-            <metadata>
-              <id>SoundFlow.FFmpeg.Native</id>
-              <version>1.0.0</version>
-              <authors>SoundFlow</authors>
-              <description>Native FFmpeg libraries for multiple platforms</description>
-              <contentFiles>
-                <files include="any/any/SoundFlow.FFmpeg.Native.targets" buildAction="None" />
-              </contentFiles>
-            </metadata>
-            <files>
-              <file src="build\SoundFlow.FFmpeg.Native.targets" target="build" />
-              <file src="runtimes\**" target="runtimes" />
-            </files>
-          </package>
-          EOF
-
-      - name: Upload NuGet package structure
-        uses: actions/upload-artifact@v4
-        with:
-          name: ffmpeg-nuget-package
-          path: nupkg
