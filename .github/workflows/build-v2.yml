@@ -1,0 +1,91 @@
+name: Build SoundFlowFFMpeg v2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            cc: gcc
+            cxx: g++
+          - os: ubuntu-latest
+            target: linux-arm64
+            cc: aarch64-linux-gnu-gcc
+            cxx: aarch64-linux-gnu-g++
+          - os: windows-latest
+            target: win-x64
+            cc: gcc
+            cxx: g++
+          - os: windows-latest
+            target: win-x86
+            cc: gcc
+            cxx: g++
+          - os: macos-latest
+            target: osx-x64
+            cc: clang
+            cxx: clang++
+          - os: macos-latest
+            target: osx-arm64
+            cc: clang
+            cxx: clang++
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y build-essential cmake ninja-build pkg-config
+            if [ "${{ matrix.target }}" == "linux-arm64" ]; then
+              sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+            fi
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            choco install make cmake mingw --force -y
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            brew install cmake make pkg-config
+          fi
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v1
+        with:
+          cmake-version: '3.20.0'
+
+      - name: Create build directory
+        run: cmake -E make_directory build
+
+      - name: Configure CMake
+        working-directory: build
+        run: |
+          if [ "${{ matrix.target }}" == "linux-arm64" ]; then
+            cmake .. -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ -DCMAKE_BUILD_TYPE=Release
+          elif [ "${{ matrix.target }}" == "win-x86" ]; then
+            cmake .. -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+          elif [ "${{ matrix.target }}" == "win-x64" ]; then
+            cmake .. -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+          else
+            cmake .. -DCMAKE_BUILD_TYPE=Release
+          fi
+
+      - name: Build
+        working-directory: build
+        run: |
+          cmake --build . --config Release --parallel $(nproc)
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts/${{ matrix.target }}
+          cp -r build/runtimes/${{ matrix.target }}/native/* artifacts/${{ matrix.target }}/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: soundflow-ffmpeg-${{ matrix.target }}
+          path: artifacts/${{ matrix.target }}/
