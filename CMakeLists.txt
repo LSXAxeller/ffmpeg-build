@@ -48,7 +48,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     set(TARGET_OS "freebsd")
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "amd64")
         set(TARGET_ARCH "x64")
     elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
         set(TARGET_ARCH "arm64")
@@ -350,6 +350,11 @@ elseif(TARGET_OS STREQUAL "linux")
         set(FFMPEG_ARCH "arm")
     elseif(TARGET_ARCH STREQUAL "arm64")
         set(FFMPEG_ARCH "aarch64")
+        list(APPEND FFMPEG_COMMON_FLAGS
+                --cross-prefix=aarch64-linux-gnu-
+                --cc=aarch64-linux-gnu-gcc
+                --cxx=aarch64-linux-gnu-g++
+        )
     endif()
     list(APPEND FFMPEG_COMMON_FLAGS
             --target-os=linux
@@ -360,14 +365,16 @@ elseif(TARGET_OS STREQUAL "linux")
         list(APPEND FFMPEG_COMMON_FLAGS --enable-cross-compile)
     endif()
 
-
 elseif(TARGET_OS STREQUAL "android")
     if(TARGET_ARCH STREQUAL "x64")
         set(FFMPEG_ARCH "x86_64")
+        set(ANDROID_TRIPLE "x86_64-linux-android${ANDROID_PLATFORM}")
     elseif(TARGET_ARCH STREQUAL "arm")
         set(FFMPEG_ARCH "arm")
+        set(ANDROID_TRIPLE "armv7a-linux-androideabi${ANDROID_PLATFORM}")
     elseif(TARGET_ARCH STREQUAL "arm64")
         set(FFMPEG_ARCH "aarch64")
+        set(ANDROID_TRIPLE "aarch64-linux-android${ANDROID_PLATFORM}")
     endif()
     list(APPEND FFMPEG_COMMON_FLAGS
             --target-os=android
@@ -375,7 +382,8 @@ elseif(TARGET_OS STREQUAL "android")
             --enable-cross-compile
             --cc=${CMAKE_C_COMPILER}
             --as=${CMAKE_C_COMPILER}
-            "--extra-cflags=--target=${CMAKE_C_COMPILER_TARGET}"
+            "--extra-cflags=--target=${ANDROID_TRIPLE}"
+            "--extra-ldflags=--target=${ANDROID_TRIPLE}"
     )
 
 elseif(TARGET_OS STREQUAL "ios")
@@ -497,10 +505,8 @@ if(TARGET_OS STREQUAL "win")
             ws2_32
             iphlpapi
     )
-    # Static linking for Windows
     target_link_options(soundflow_ffmpeg PRIVATE -static -static-libgcc -static-libstdc++)
 elseif(TARGET_OS STREQUAL "osx" OR TARGET_OS STREQUAL "ios")
-    # For Apple platforms, find and link required frameworks
     find_library(CORE_FOUNDATION_FRAMEWORK CoreFoundation)
     find_library(VIDEO_TOOLBOX_FRAMEWORK VideoToolbox)
     find_library(AUDIO_TOOLBOX_FRAMEWORK AudioToolbox)
