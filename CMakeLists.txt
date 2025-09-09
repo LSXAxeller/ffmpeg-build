@@ -340,6 +340,22 @@ elseif(TARGET_OS STREQUAL "osx")
             --enable-runtime-cpudetect
     )
 
+elseif(TARGET_OS STREQUAL "linux")
+    if(TARGET_ARCH STREQUAL "x64")
+        set(FFMPEG_ARCH "x86_64")
+    elseif(TARGET_ARCH MATCHES "^arm")
+        set(FFMPEG_ARCH "arm")
+    elseif(TARGET_ARCH STREQUAL "aarch64")
+        set(FFMPEG_ARCH "arm64")
+    endif()
+    list(APPEND FFMPEG_COMMON_FLAGS
+            --target-os=linux
+            --arch=${FFMPEG_ARCH}
+            --enable-pic
+            "--extra-cflags=-fPIC"
+            "--extra-ldflags=-shared"
+    )
+
 elseif(TARGET_OS STREQUAL "android")
     if(TARGET_ARCH STREQUAL "x64")
         set(FFMPEG_ARCH "x86_64")
