@@ -3,34 +3,34 @@ project(SoundFlowFFmpeg C)
 
 cmake_policy(SET CMP0135 NEW)
 
-# Platform detection and RID mapping
+# Helper – normalise CPU names that vary between OSes / toolchains
+function(normalise_arch IN OUT)
+    string(TOLOWER "${IN}" _arch)
+    if(_arch STREQUAL "x86_64" OR _arch STREQUAL "amd64")
+        set(${OUT} "x64"      PARENT_SCOPE)
+    elseif(_arch STREQUAL "i686" OR _arch STREQUAL "x86")
+        set(${OUT} "x86"      PARENT_SCOPE)
+    elseif(_arch MATCHES "^armv?7")
+        set(${OUT} "arm"      PARENT_SCOPE)
+    elseif(_arch STREQUAL "aarch64" OR _arch STREQUAL "arm64")
+        set(${OUT} "arm64"    PARENT_SCOPE)
+    else()
+        set(${OUT} "${_arch}" PARENT_SCOPE)   # fall-through
+    endif()
+endfunction()
+
+# Platform / RID detection
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(TARGET_OS "win")
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "AMD64")
-        set(TARGET_ARCH "x64")
-    elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "i686")
-        set(TARGET_ARCH "x86")
-    elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
-        set(TARGET_ARCH "arm64")
-    endif()
+    normalise_arch("${CMAKE_SYSTEM_PROCESSOR}" TARGET_ARCH)
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(TARGET_OS "linux")
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "AMD64")
-        set(TARGET_ARCH "x64")
-    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
-        set(TARGET_ARCH "arm")
-    elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
-        set(TARGET_ARCH "arm64")
-    endif()
+    normalise_arch("${CMAKE_SYSTEM_PROCESSOR}" TARGET_ARCH)
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     set(TARGET_OS "osx")
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-        set(TARGET_ARCH "x64")
-    elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
-        set(TARGET_ARCH "arm64")
-    endif()
+    normalise_arch("${CMAKE_SYSTEM_PROCESSOR}" TARGET_ARCH)
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(TARGET_OS "ios")
@@ -48,26 +48,23 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     set(TARGET_OS "freebsd")
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "amd64")
-        set(TARGET_ARCH "x64")
-    elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
-        set(TARGET_ARCH "arm64")
-    endif()
+    normalise_arch("${CMAKE_SYSTEM_PROCESSOR}" TARGET_ARCH)
 endif()
 
-# Set .NET-style RID and output directory
+# .NET-style RID and output layout
 set(RUNTIME_ID "${TARGET_OS}-${TARGET_ARCH}")
 set(OUTPUT_DIR "${CMAKE_BINARY_DIR}/runtimes/${RUNTIME_ID}/native")
 set(FFMPEG_INSTALL_DIR "${CMAKE_BINARY_DIR}/ffmpeg-install")
 
-# FFmpeg configuration
+# FFmpeg – download/build parameters
 set(FFMPEG_VERSION "8.0")
 set(FFMPEG_URL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.gz")
+
 if(NOT CMAKE_BUILD_PARALLEL_LEVEL)
     set(CMAKE_BUILD_PARALLEL_LEVEL 1)
 endif()
 
-# Configure Flags
+# Common configure flags
 set(FFMPEG_COMMON_FLAGS
         # Build Type
         --disable-shared
@@ -301,7 +298,14 @@ set(FFMPEG_COMMON_FLAGS
         --enable-encoder=pcm_u32le
 )
 
-# Platform-specific flags for FFmpeg
+# Re-enable ffmpeg / ffprobe ONLY when we build natively
+if(NOT CMAKE_CROSSCOMPILING)
+    list(APPEND FFMPEG_COMMON_FLAGS
+            --enable-ffmpeg
+            --enable-ffprobe)
+endif()
+
+# Per-platform additions
 if(TARGET_OS STREQUAL "win")
     if(TARGET_ARCH STREQUAL "x64")
         set(FFMPEG_ARCH "x86_64")
@@ -310,57 +314,48 @@ if(TARGET_OS STREQUAL "win")
     elseif(TARGET_ARCH STREQUAL "arm64")
         set(FFMPEG_ARCH "aarch64")
     endif()
+
     list(APPEND FFMPEG_COMMON_FLAGS
             --target-os=mingw32
             --arch=${FFMPEG_ARCH}
             "--extra-cflags=-O2 -static -static-libgcc -static-libstdc++"
-            "--extra-ldflags=-static"
-    )
+            "--extra-ldflags=-static")
+
     if(CMAKE_CROSSCOMPILING)
-        if(FFMPEG_ARCH STREQUAL "x86_64")
-            list(APPEND FFMPEG_COMMON_FLAGS --cross-prefix=x86_64-w64-mingw32-)
-        elseif(FFMPEG_ARCH STREQUAL "x86")
-            list(APPEND FFMPEG_COMMON_FLAGS --cross-prefix=i686-w64-mingw32-)
-        elseif(FFMPEG_ARCH STREQUAL "aarch64")
-            list(APPEND FFMPEG_COMMON_FLAGS --cross-prefix=aarch64-w64-mingw32-)
-        endif()
+        list(APPEND FFMPEG_COMMON_FLAGS --cross-prefix=${FFMPEG_ARCH}-w64-mingw32-)
     endif()
 
 elseif(TARGET_OS STREQUAL "osx")
     if(TARGET_ARCH STREQUAL "x64")
         set(FFMPEG_ARCH "x86_64")
         set(MACOS_TARGET "x86_64-apple-darwin")
-    elseif(TARGET_ARCH STREQUAL "arm64")
+    else()
         set(FFMPEG_ARCH "aarch64")
         set(MACOS_TARGET "arm64-apple-darwin")
     endif()
+
     list(APPEND FFMPEG_COMMON_FLAGS
             --target-os=darwin
             --arch=${FFMPEG_ARCH}
             --enable-cross-compile
             "--extra-cflags=-target ${MACOS_TARGET}"
             "--extra-ldflags=-target ${MACOS_TARGET}"
-            --enable-runtime-cpudetect
-    )
+            --enable-runtime-cpudetect)
 
 elseif(TARGET_OS STREQUAL "linux")
     if(TARGET_ARCH STREQUAL "x64")
         set(FFMPEG_ARCH "x86_64")
-    elseif(TARGET_ARCH MATCHES "^arm")
+    elseif(TARGET_ARCH STREQUAL "arm")
         set(FFMPEG_ARCH "arm")
-    elseif(TARGET_ARCH STREQUAL "arm64")
+    else()
         set(FFMPEG_ARCH "aarch64")
-        list(APPEND FFMPEG_COMMON_FLAGS
-                --cross-prefix=aarch64-linux-gnu-
-                --cc=aarch64-linux-gnu-gcc
-                --cxx=aarch64-linux-gnu-g++
-        )
     endif()
+
     list(APPEND FFMPEG_COMMON_FLAGS
             --target-os=linux
             --arch=${FFMPEG_ARCH}
-            --enable-pic
-    )
+            --enable-pic)
+
     if(CMAKE_CROSSCOMPILING)
         list(APPEND FFMPEG_COMMON_FLAGS --enable-cross-compile)
     endif()
@@ -368,23 +363,21 @@ elseif(TARGET_OS STREQUAL "linux")
 elseif(TARGET_OS STREQUAL "android")
     if(TARGET_ARCH STREQUAL "x64")
         set(FFMPEG_ARCH "x86_64")
-        set(ANDROID_TRIPLE "x86_64-linux-android${ANDROID_PLATFORM}")
     elseif(TARGET_ARCH STREQUAL "arm")
         set(FFMPEG_ARCH "arm")
-        set(ANDROID_TRIPLE "armv7a-linux-androideabi${ANDROID_PLATFORM}")
-    elseif(TARGET_ARCH STREQUAL "arm64")
+    else()
         set(FFMPEG_ARCH "aarch64")
-        set(ANDROID_TRIPLE "aarch64-linux-android${ANDROID_PLATFORM}")
     endif()
+
     list(APPEND FFMPEG_COMMON_FLAGS
             --target-os=android
             --arch=${FFMPEG_ARCH}
             --enable-cross-compile
             --cc=${CMAKE_C_COMPILER}
             --as=${CMAKE_C_COMPILER}
-            "--extra-cflags=--target=${ANDROID_TRIPLE}"
-            "--extra-ldflags=--target=${ANDROID_TRIPLE}"
-    )
+            "--extra-cflags=--target=${CMAKE_C_COMPILER_TARGET}"
+            "--cross-prefix=${CMAKE_C_COMPILER_TARGET}-"
+            "--sysroot=${CMAKE_SYSROOT}")
 
 elseif(TARGET_OS STREQUAL "ios")
     list(APPEND FFMPEG_COMMON_FLAGS
@@ -393,133 +386,100 @@ elseif(TARGET_OS STREQUAL "ios")
             --enable-cross-compile
             --disable-asm
             "--extra-cflags=-arch arm64 -isysroot ${CMAKE_OSX_SYSROOT} -miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}"
-            "--extra-ldflags=-arch arm64 -isysroot ${CMAKE_OSX_SYSROOT} -miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}"
-    )
+            "--extra-ldflags=-arch arm64 -isysroot ${CMAKE_OSX_SYSROOT} -miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
 
 elseif(TARGET_OS STREQUAL "freebsd")
     if(TARGET_ARCH STREQUAL "x64")
         set(FFMPEG_ARCH "x86_64")
-    elseif(TARGET_ARCH STREQUAL "arm64")
+    else()
         set(FFMPEG_ARCH "aarch64")
     endif()
+
     list(APPEND FFMPEG_COMMON_FLAGS
             --target-os=freebsd
-            --arch=${FFMPEG_ARCH}
-    )
+            --arch=${FFMPEG_ARCH})
+
     if(CMAKE_CROSSCOMPILING)
-        if(FFMPEG_ARCH STREQUAL "x86_64")
-            list(APPEND FFMPEG_COMMON_FLAGS --cross-prefix=x86_64-unknown-freebsd-)
-        elseif(FFMPEG_ARCH STREQUAL "aarch64")
-            list(APPEND FFMPEG_COMMON_FLAGS --cross-prefix=aarch64-unknown-freebsd-)
-        endif()
+        list(APPEND FFMPEG_COMMON_FLAGS --cross-prefix=${FFMPEG_ARCH}-unknown-freebsd-)
     endif()
 endif()
 
-# Find bash for configure script
+# External build of FFmpeg
 find_program(BASH_EXECUTABLE bash REQUIRED)
 
-# FFmpeg External Project
 include(ExternalProject)
 ExternalProject_Add(ffmpeg_dependency
-        URL                 ${FFMPEG_URL}
-        PREFIX              ${CMAKE_BINARY_DIR}/ffmpeg
-        INSTALL_DIR         ${FFMPEG_INSTALL_DIR}
-        BUILD_IN_SOURCE     1
-        CONFIGURE_COMMAND   ${BASH_EXECUTABLE} <SOURCE_DIR>/configure
+        URL               ${FFMPEG_URL}
+        PREFIX            ${CMAKE_BINARY_DIR}/ffmpeg
+        INSTALL_DIR       ${FFMPEG_INSTALL_DIR}
+        BUILD_IN_SOURCE   1
+        CONFIGURE_COMMAND ${BASH_EXECUTABLE} <SOURCE_DIR>/configure
         --prefix=${FFMPEG_INSTALL_DIR}
         ${FFMPEG_COMMON_FLAGS}
-        BUILD_COMMAND       ${CMAKE_MAKE_PROGRAM} -j${CMAKE_BUILD_PARALLEL_LEVEL}
-        INSTALL_COMMAND     ${CMAKE_MAKE_PROGRAM} install
-        LOG_DOWNLOAD        1
-        LOG_CONFIGURE       1
-        LOG_BUILD           1
-        LOG_INSTALL         1
+        BUILD_COMMAND     ${CMAKE_MAKE_PROGRAM} -j${CMAKE_BUILD_PARALLEL_LEVEL}
+        INSTALL_COMMAND   ${CMAKE_MAKE_PROGRAM} install
+        LOG_DOWNLOAD      1
+        LOG_CONFIGURE     1
+        LOG_BUILD         1
+        LOG_INSTALL       1
 )
 
-# Now build your wrapper library
+# SoundFlow library
 add_library(soundflow_ffmpeg SHARED
         wrapper_src/soundflow_ffmpeg.c
-        wrapper_src/soundflow_ffmpeg.h
-)
+        wrapper_src/soundflow_ffmpeg.h)
 
-# Depend on FFmpeg build
 add_dependencies(soundflow_ffmpeg ffmpeg_dependency)
 
-# Set output properties for .NET-style naming
+# Naming / output
 if(TARGET_OS STREQUAL "win")
     set_target_properties(soundflow_ffmpeg PROPERTIES
-            PREFIX ""
-            SUFFIX ".dll"
-            OUTPUT_NAME "soundflow_ffmpeg"
-    )
+            PREFIX "" SUFFIX ".dll" OUTPUT_NAME "soundflow_ffmpeg")
 elseif(TARGET_OS STREQUAL "linux" OR TARGET_OS STREQUAL "freebsd" OR TARGET_OS STREQUAL "android")
     set_target_properties(soundflow_ffmpeg PROPERTIES
-            PREFIX "lib"
-            SUFFIX ".so"
-            OUTPUT_NAME "soundflow_ffmpeg"
-    )
+            PREFIX "lib" SUFFIX ".so" OUTPUT_NAME "soundflow_ffmpeg")
 elseif(TARGET_OS STREQUAL "osx")
     set_target_properties(soundflow_ffmpeg PROPERTIES
-            PREFIX "lib"
-            SUFFIX ".dylib"
-            OUTPUT_NAME "soundflow_ffmpeg"
-    )
+            PREFIX "lib" SUFFIX ".dylib" OUTPUT_NAME "soundflow_ffmpeg")
 elseif(TARGET_OS STREQUAL "ios")
     set_target_properties(soundflow_ffmpeg PROPERTIES
             FRAMEWORK TRUE
             OUTPUT_NAME "soundflow_ffmpeg"
             FRAMEWORK_VERSION A
-            MACOSX_FRAMEWORK_IDENTIFIER com.soundflow.ffmpeg
-    )
+            MACOSX_FRAMEWORK_IDENTIFIER com.soundflow.ffmpeg)
 endif()
 
-# Set output directories for all artifacts
 set_target_properties(soundflow_ffmpeg PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${OUTPUT_DIR}"
-        LIBRARY_OUTPUT_DIRECTORY "${OUTPUT_DIR}"
-        ARCHIVE_OUTPUT_DIRECTORY "${OUTPUT_DIR}"
-)
+        RUNTIME_OUTPUT_DIRECTORY  "${OUTPUT_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY  "${OUTPUT_DIR}"
+        ARCHIVE_OUTPUT_DIRECTORY  "${OUTPUT_DIR}")
 
-# Include directories
+# Include / link against FFmpeg
 target_include_directories(soundflow_ffmpeg PRIVATE
         ${FFMPEG_INSTALL_DIR}/include
-        wrapper_src/
-)
+        wrapper_src/)
 
-# Link directories and libraries
-target_link_directories(soundflow_ffmpeg PRIVATE ${FFMPEG_INSTALL_DIR}/lib)
+target_link_directories(soundflow_ffmpeg PRIVATE
+        ${FFMPEG_INSTALL_DIR}/lib)
 
-# Link against static FFmpeg libraries
 target_link_libraries(soundflow_ffmpeg PRIVATE
-        avformat
-        avcodec
-        swresample
-        avutil
-)
+        avformat avcodec swresample avutil)
 
-# Platform-specific system libraries
+# Platform system libraries
 if(TARGET_OS STREQUAL "win")
     target_link_libraries(soundflow_ffmpeg PRIVATE
-            bcrypt
-            secur32
-            ws2_32
-            iphlpapi
-    )
-    target_link_options(soundflow_ffmpeg PRIVATE -static -static-libgcc -static-libstdc++)
+            bcrypt secur32 ws2_32 iphlpapi)
+    target_link_options(soundflow_ffmpeg PRIVATE
+            -static -static-libgcc -static-libstdc++)
 elseif(TARGET_OS STREQUAL "osx" OR TARGET_OS STREQUAL "ios")
     find_library(CORE_FOUNDATION_FRAMEWORK CoreFoundation)
     find_library(VIDEO_TOOLBOX_FRAMEWORK VideoToolbox)
     find_library(AUDIO_TOOLBOX_FRAMEWORK AudioToolbox)
     target_link_libraries(soundflow_ffmpeg PRIVATE
-            m
-            pthread
+            m pthread
             ${CORE_FOUNDATION_FRAMEWORK}
             ${VIDEO_TOOLBOX_FRAMEWORK}
-            ${AUDIO_TOOLBOX_FRAMEWORK}
-    )
+            ${AUDIO_TOOLBOX_FRAMEWORK})
 else()
-    target_link_libraries(soundflow_ffmpeg PRIVATE
-            m
-            pthread
-    )
+    target_link_libraries(soundflow_ffmpeg PRIVATE m pthread)
 endif()
