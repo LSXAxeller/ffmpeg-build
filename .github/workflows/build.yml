@@ -3,6 +3,11 @@ name: Build SoundFlowFFmpeg v1
 on:
   workflow_dispatch:
 
+# Cancel in-progress runs on new commits to the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Windows builds
   build-windows:
@@ -83,11 +88,9 @@ jobs:
         run: |
           mkdir build
           cd build
-          # Need to ensure FFmpeg is built with -fPIC for shared library
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+            -DCMAKE_SYSTEM_PROCESSOR=x86_64
           cmake --build . --parallel $(nproc) --verbose
 
       - name: Configure and Build (ARM64)
@@ -100,12 +103,7 @@ jobs:
             -DCMAKE_SYSTEM_NAME=Linux \
             -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
             -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
-            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
-            -DCMAKE_FIND_ROOT_PATH=/usr/aarch64-linux-gnu \
-            -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
-            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
-            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
           cmake --build . --parallel $(nproc) --verbose
 
       - name: Upload artifacts
@@ -165,11 +163,11 @@ jobs:
     strategy:
       matrix:
         include:
-          - arch: x64
+          - rid_arch: x64
             abi: x86_64
-          - arch: arm
+          - rid_arch: arm
             abi: armeabi-v7a
-          - arch: arm64
+          - rid_arch: arm64
             abi: arm64-v8a
     runs-on: ubuntu-latest
     steps:
@@ -192,35 +190,18 @@ jobs:
         run: |
           mkdir build
           cd build
-          
-          # Set proper environment for Android cross-compilation
-          export PATH=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
-          
-          # Map ABI to architecture for CMake
-          if [ "${{ matrix.abi }}" = "x86_64" ]; then
-            ARCH="x86_64"
-          elif [ "${{ matrix.abi }}" = "armeabi-v7a" ]; then
-            ARCH="arm"
-          elif [ "${{ matrix.abi }}" = "arm64-v8a" ]; then
-            ARCH="arm64"
-          fi
-          
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_SYSTEM_NAME=Android \
-            -DCMAKE_ANDROID_ARCH=${{ matrix.abi }} \
-            -DCMAKE_ANDROID_NDK=$ANDROID_NDK_ROOT \
-            -DCMAKE_ANDROID_STL_TYPE=c++_static \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=${{ matrix.abi }} \
-            -DANDROID_PLATFORM=android-21 \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake
+            -DANDROID_PLATFORM=21
           cmake --build . --parallel $(nproc) --verbose
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: soundflow-ffmpeg-android-${{ matrix.arch }}
-          path: build/runtimes/android-${{ matrix.arch }}/native/*
+          name: soundflow-ffmpeg-android-${{ matrix.rid_arch }}
+          path: build/runtimes/android-${{ matrix.rid_arch }}/native/*
 
   # FreeBSD build
   build-freebsd:
@@ -240,14 +221,16 @@ jobs:
           run: |
             # Install dependencies
             sudo pkg install -y cmake gmake nasm yasm pkgconf bash
-            
-            # Build without cross-compilation prefix for native build
+
+            # Create and enter build directory
             mkdir build
             cd build
+
+            # Configure and build
             cmake .. \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_MAKE_PROGRAM=gmake
-            gmake -j$(sysctl -n hw.ncpu) VERBOSE=1
+            cmake --build . --parallel $(sysctl -n hw.ncpu) --verbose
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -278,10 +261,8 @@ jobs:
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_SYSTEM_NAME=iOS \
-            -DIOS=1 \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
-            -DCMAKE_IOS_INSTALL_COMBINED=YES
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
           cmake --build . --parallel $(sysctl -n hw.ncpu) --verbose
 
       - name: Upload artifacts
