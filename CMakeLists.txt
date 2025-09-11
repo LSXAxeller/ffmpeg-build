@@ -364,7 +364,9 @@ elseif(TARGET_OS STREQUAL "linux")
             --enable-pic)
 
     if(CMAKE_CROSSCOMPILING)
-        list(APPEND FFMPEG_COMMON_FLAGS --enable-cross-compile)
+        list(APPEND FFMPEG_COMMON_FLAGS
+                --enable-cross-compile
+                --cross-prefix=aarch64-linux-gnu-)
     endif()
 
 elseif(TARGET_OS STREQUAL "android")
@@ -404,7 +406,8 @@ elseif(TARGET_OS STREQUAL "freebsd")
 
     list(APPEND FFMPEG_COMMON_FLAGS
             --target-os=freebsd
-            --arch=${FFMPEG_ARCH})
+            --arch=${FFMPEG_ARCH}
+            --cc=cc)
 
     if(CMAKE_CROSSCOMPILING)
         list(APPEND FFMPEG_COMMON_FLAGS --cross-prefix=${FFMPEG_ARCH}-unknown-freebsd-)
