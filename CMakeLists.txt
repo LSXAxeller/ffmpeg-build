@@ -370,21 +370,28 @@ elseif(TARGET_OS STREQUAL "linux")
     endif()
 
 elseif(TARGET_OS STREQUAL "android")
-    if(TARGET_ARCH STREQUAL "x64")
+    if(ANDROID_ABI STREQUAL "x86_64")
+        set(TARGET_ARCH "x64")
         set(FFMPEG_ARCH "x86_64")
-    elseif(TARGET_ARCH STREQUAL "arm")
+    elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
+        set(TARGET_ARCH "arm")
         set(FFMPEG_ARCH "arm")
-    else()
+    elseif(ANDROID_ABI STREQUAL "arm64-v8a")
+        set(TARGET_ARCH "arm64")
         set(FFMPEG_ARCH "aarch64")
     endif()
 
-list(APPEND FFMPEG_COMMON_FLAGS
-        --target-os=android
-        --arch=${FFMPEG_ARCH}
-        --enable-cross-compile
-        --cc=${CMAKE_C_COMPILER}
-        "--extra-cflags=--target=${CMAKE_C_COMPILER_TARGET}"
-        "--sysroot=${CMAKE_SYSROOT}")
+    # Get the directory where the NDK toolchain binaries are located
+    get_filename_component(NDK_TOOLCHAIN_BIN_DIR ${CMAKE_C_COMPILER} DIRECTORY)
+
+    list(APPEND FFMPEG_COMMON_FLAGS
+            --target-os=android
+            --arch=${FFMPEG_ARCH}
+            --enable-cross-compile
+            --cc=${CMAKE_C_COMPILER}
+            --cross-prefix=${NDK_TOOLCHAIN_BIN_DIR}/llvm-
+            "--extra-cflags=--target=${CMAKE_C_COMPILER_TARGET}"
+            "--sysroot=${CMAKE_SYSROOT}")
 
 elseif(TARGET_OS STREQUAL "ios")
     list(APPEND FFMPEG_COMMON_FLAGS
