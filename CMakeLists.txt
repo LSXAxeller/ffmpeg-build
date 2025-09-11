@@ -504,6 +504,8 @@ elseif(TARGET_OS STREQUAL "osx" OR TARGET_OS STREQUAL "ios")
             ${CORE_FOUNDATION_FRAMEWORK}
             ${VIDEO_TOOLBOX_FRAMEWORK}
             ${AUDIO_TOOLBOX_FRAMEWORK})
-else()
+elseif(TARGET_OS STREQUAL "linux" OR TARGET_OS STREQUAL "freebsd")
     target_link_libraries(soundflow_ffmpeg PRIVATE m pthread)
+elseif(TARGET_OS STREQUAL "android")
+    target_link_libraries(soundflow_ffmpeg PRIVATE m atomic)
 endif()

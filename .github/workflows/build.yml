@@ -270,3 +270,60 @@ jobs:
         with:
           name: soundflow-ffmpeg-ios-arm64
           path: build/runtimes/ios-arm64/native/*
+
+  package-artifacts:
+    name: Package all artifacts
+    runs-on: ubuntu-latest
+    needs:
+      - build-windows
+      - build-linux
+      - build-macos
+      - build-android
+      - build-freebsd
+      - build-ios
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Reorganize artifacts into a single runtimes folder
+        run: |
+          mkdir runtimes
+          for dir in artifacts/*; do
+            # Extract the RID (e.g., "win-x64") from the artifact directory name.
+            local_dir_name=$(basename "$dir")
+            rid="${local_dir_name#soundflow-ffmpeg-}"
+
+            echo "Processing artifact for RID: $rid"
+
+            # Create the target directory structure
+            target_dir="runtimes/$rid/native"
+            mkdir -p "$target_dir"
+
+            # Move the files
+            # Check if source directory is not empty before moving
+            if [ -n "$(ls -A $dir)" ]; then
+              mv "$dir"/* "$target_dir/"
+            else
+              echo "Warning: Artifact directory '$local_dir_name' is empty."
+            fi
+          done
+
+      - name: Verify final runtimes structure
+        run: |
+          echo "Final structure of the 'runtimes' directory:"
+          ls -R runtimes
+
+      - name: Create zip archive
+        run: |
+          zip -r soundflow-ffmpeg-runtimes.zip runtimes
+
+      - name: Upload final archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: soundflow-ffmpeg-runtimes
+          path: soundflow-ffmpeg-runtimes.zip
