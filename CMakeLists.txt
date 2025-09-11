@@ -51,6 +51,13 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     normalise_arch("${CMAKE_SYSTEM_PROCESSOR}" TARGET_ARCH)
 endif()
 
+# Set symbolic linker flags for ELF-based systems
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
+        CMAKE_SYSTEM_NAME STREQUAL "Android" OR
+        CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    set(CMAKE_SHARED_LINKER_FLAGS "-Wl,-Bsymbolic")
+endif()
+
 # .NET-style RID and output layout
 set(RUNTIME_ID "${TARGET_OS}-${TARGET_ARCH}")
 set(OUTPUT_DIR "${CMAKE_BINARY_DIR}/runtimes/${RUNTIME_ID}/native")
