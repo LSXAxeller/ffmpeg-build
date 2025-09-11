@@ -378,15 +378,13 @@ elseif(TARGET_OS STREQUAL "android")
         set(FFMPEG_ARCH "aarch64")
     endif()
 
-    list(APPEND FFMPEG_COMMON_FLAGS
-            --target-os=android
-            --arch=${FFMPEG_ARCH}
-            --enable-cross-compile
-            --cc=${CMAKE_C_COMPILER}
-            --as=${CMAKE_C_COMPILER}
-            "--extra-cflags=--target=${CMAKE_C_COMPILER_TARGET}"
-            "--cross-prefix=${CMAKE_C_COMPILER_TARGET}-"
-            "--sysroot=${CMAKE_SYSROOT}")
+list(APPEND FFMPEG_COMMON_FLAGS
+        --target-os=android
+        --arch=${FFMPEG_ARCH}
+        --enable-cross-compile
+        --cc=${CMAKE_C_COMPILER}
+        "--extra-cflags=--target=${CMAKE_C_COMPILER_TARGET}"
+        "--sysroot=${CMAKE_SYSROOT}")
 
 elseif(TARGET_OS STREQUAL "ios")
     list(APPEND FFMPEG_COMMON_FLAGS
