@@ -18,17 +18,12 @@ jobs:
           - arch: x64
             msystem: MINGW64
             mingw-package-prefix: mingw-w64-x86_64
-            compiler_packages: mingw-w64-x86_64-gcc
           - arch: x86
             msystem: MINGW32
             mingw-package-prefix: mingw-w64-i686
-            compiler_packages: mingw-w64-i686-gcc
           - arch: arm64
-            msystem: MINGW64
-            mingw-package-prefix: mingw-w64-x86_64
-            compiler_packages: >-
-              mingw-w64-x86_64-clang
-              mingw-w64-x86_64-lld
+            msystem: CLANGARM64
+            mingw-package-prefix: mingw-w64-clang-aarch64
     runs-on: windows-latest
     defaults:
       run:
@@ -41,7 +36,7 @@ jobs:
           msystem: ${{ matrix.msystem }}
           update: true
           install: >-
-            ${{ matrix.compiler_packages }}
+            ${{ matrix.mingw-package-prefix }}-gcc
             ${{ matrix.mingw-package-prefix }}-cmake
             ${{ matrix.mingw-package-prefix }}-ninja
             ${{ matrix.mingw-package-prefix }}-make
@@ -51,47 +46,13 @@ jobs:
             nasm
             yasm
 
-      - name: Create ARM64 Toolchain File
-        if: matrix.arch == 'arm64'
-        run: |
-          cat <<EOF > arm64-toolchain.cmake
-          set(CMAKE_SYSTEM_NAME Windows)
-          set(CMAKE_SYSTEM_PROCESSOR aarch64)
-
-          set(CMAKE_C_COMPILER   clang)
-          set(CMAKE_CXX_COMPILER clang++)
-          set(CMAKE_RC_COMPILER  llvm-windres)
-
-          set(CMAKE_C_COMPILER_TARGET   aarch64-w64-mingw32)
-          set(CMAKE_CXX_COMPILER_TARGET aarch64-w64-mingw32)
-
-          # FIX: Explicitly tell clang to use the lld linker
-          set(CMAKE_EXE_LINKER_FLAGS "-fuse-ld=lld")
-          set(CMAKE_SHARED_LINKER_FLAGS "-fuse-ld=lld")
-
-          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
-          EOF
-
       - name: Configure and Build
         run: |
-          CMAKE_EXTRA_ARGS=""
-          if [[ "${{ matrix.arch }}" == "arm64" ]]; then
-            CMAKE_EXTRA_ARGS="-DCMAKE_TOOLCHAIN_FILE=../arm64-toolchain.cmake"
-          else
-            # For native builds, pass the processor hint. Toolchain handles it for cross-compiles.
-            CMAKE_EXTRA_ARGS="-DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }}"
-          fi
-
           mkdir build
           cd build
-
-          cmake .. -G "Ninja" \
+          cmake .. -G "MinGW Makefiles" \
             -DCMAKE_BUILD_TYPE=Release \
-            $CMAKE_EXTRA_ARGS
-
+            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }}
           cmake --build . --parallel $(nproc) --verbose
 
       - name: Upload artifacts
