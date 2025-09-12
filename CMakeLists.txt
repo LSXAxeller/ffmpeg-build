@@ -22,7 +22,16 @@ endfunction()
 # Platform / RID detection
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(TARGET_OS "win")
-    normalise_arch("${CMAKE_SYSTEM_PROCESSOR}" TARGET_ARCH)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|AARCH64")
+        normalise_arch("${CMAKE_SYSTEM_PROCESSOR}" TARGET_ARCH)
+    elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(TARGET_ARCH "x64")
+    elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
+        set(TARGET_ARCH "x86")
+    else()
+        # Fallback for any other unforeseen cases
+        normalise_arch("${CMAKE_SYSTEM_PROCESSOR}" TARGET_ARCH)
+    endif()
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(TARGET_OS "linux")

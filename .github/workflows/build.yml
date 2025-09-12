@@ -12,6 +12,7 @@ jobs:
   # Windows builds
   build-windows:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x64
@@ -20,6 +21,9 @@ jobs:
           - arch: x86
             msystem: MINGW32
             mingw-package-prefix: mingw-w64-i686
+          - arch: arm64
+            msystem: CLANGARM64
+            mingw-package-prefix: mingw-w64-clang-aarch64
     runs-on: windows-latest
     defaults:
       run:
@@ -60,50 +64,42 @@ jobs:
   # Linux builds
   build-linux:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x64
-            os: ubuntu-latest
+            cmake_opts: -DCMAKE_SYSTEM_PROCESSOR=x86_64
+            toolchain_pkgs: ""
           - arch: arm64
-            os: ubuntu-latest
-    runs-on: ${{ matrix.os }}
+            cmake_opts: >-
+              -DCMAKE_SYSTEM_NAME=Linux
+              -DCMAKE_SYSTEM_PROCESSOR=aarch64
+              -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc
+              -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+            toolchain_pkgs: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          - arch: arm
+            cmake_opts: >-
+              -DCMAKE_SYSTEM_NAME=Linux
+              -DCMAKE_SYSTEM_PROCESSOR=arm
+              -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc
+              -DCMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++
+            toolchain_pkgs: gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install native dependencies
-        if: matrix.arch == 'x64'
+      # IMPROVEMENT: Consolidated dependency installation into a single step.
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake nasm yasm pkg-config
+          sudo apt-get install -y build-essential cmake nasm yasm pkg-config ${{ matrix.toolchain_pkgs }}
 
-      - name: Setup ARM64 cross-compilation
-        if: matrix.arch == 'arm64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-            build-essential cmake nasm yasm pkg-config
-
-      - name: Configure and Build (x64)
-        if: matrix.arch == 'x64'
+      # IMPROVEMENT: Consolidated configure and build step into a single step.
+      - name: Configure and Build
         run: |
           mkdir build
           cd build
-          cmake .. \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_SYSTEM_PROCESSOR=x86_64
-          cmake --build . --parallel $(nproc) --verbose
-
-      - name: Configure and Build (ARM64)
-        if: matrix.arch == 'arm64'
-        run: |
-          mkdir build
-          cd build
-          cmake .. \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_SYSTEM_NAME=Linux \
-            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
-            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+          cmake .. -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_opts }}
           cmake --build . --parallel $(nproc) --verbose
 
       - name: Upload artifacts
@@ -115,41 +111,36 @@ jobs:
   # macOS builds
   build-macos:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x64
-            os: macos-13  # Intel
+            os: macos-13
+            cmake_arch: x86_64
           - arch: arm64
-            os: macos-14  # Apple Silicon
+            os: macos-14
+            cmake_arch: arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
-          # Check if cmake is installed via homebrew and update if needed
-          if brew list cmake &>/dev/null; then
-            brew upgrade cmake || true
-          else
-            brew install cmake
-          fi
-          brew install nasm yasm pkg-config
+          brew bundle --file=- <<EOF
+          brew "cmake"
+          brew "nasm"
+          brew "yasm"
+          brew "pkg-config"
+          EOF
 
       - name: Configure and Build
         run: |
           mkdir build
           cd build
-          if [ "${{ matrix.arch }}" = "x64" ]; then
-            cmake .. \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-              -DCMAKE_SYSTEM_PROCESSOR=x86_64
-          else
-            cmake .. \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_OSX_ARCHITECTURES=arm64 \
-              -DCMAKE_SYSTEM_PROCESSOR=arm64
-          fi
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }} \
+            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_arch }}
           cmake --build . --parallel $(sysctl -n hw.ncpu) --verbose
 
       - name: Upload artifacts
@@ -161,6 +152,7 @@ jobs:
   # Android builds
   build-android:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - rid_arch: x64
@@ -169,7 +161,7 @@ jobs:
             abi: armeabi-v7a
           - rid_arch: arm64
             abi: arm64-v8a
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -205,10 +197,15 @@ jobs:
 
   # FreeBSD build
   build-freebsd:
-    runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        arch: [x64]
+        include:
+          - arch: x64
+            vm_arch: x86_64
+          - arch: arm64
+            vm_arch: aarch64
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -217,7 +214,7 @@ jobs:
         with:
           operating_system: freebsd
           version: '14.0'
-          architecture: x86_64
+          architecture: ${{ matrix.vm_arch }}
           run: |
             # Install dependencies
             sudo pkg install -y cmake gmake nasm yasm pkgconf bash
@@ -246,13 +243,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # Check if cmake is installed via homebrew and update if needed
-          if brew list cmake &>/dev/null; then
-            brew upgrade cmake || true
-          else
-            brew install cmake
-          fi
-          brew install nasm yasm pkg-config
+          brew bundle --file=- <<EOF
+          brew "cmake"
+          brew "nasm"
+          brew "yasm"
+          brew "pkg-config"
+          EOF
 
       - name: Configure and Build
         run: |
@@ -273,7 +269,7 @@ jobs:
 
   package-artifacts:
     name: Package all artifacts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs:
       - build-windows
       - build-linux
@@ -305,7 +301,6 @@ jobs:
             mkdir -p "$target_dir"
 
             # Move the files
-            # Check if source directory is not empty before moving
             if [ -n "$(ls -A $dir)" ]; then
               mv "$dir"/* "$target_dir/"
             else
@@ -319,8 +314,7 @@ jobs:
           ls -R runtimes
 
       - name: Create zip archive
-        run: |
-          zip -r soundflow-ffmpeg-runtimes.zip runtimes
+        run: zip -r soundflow-ffmpeg-runtimes.zip runtimes
 
       - name: Upload final archive
         uses: actions/upload-artifact@v4
