@@ -469,17 +469,17 @@ add_dependencies(soundflow_ffmpeg ffmpeg_dependency)
 # Naming / output
 if(TARGET_OS STREQUAL "win")
     set_target_properties(soundflow_ffmpeg PROPERTIES
-            PREFIX "" SUFFIX ".dll" OUTPUT_NAME "soundflow_ffmpeg")
+            PREFIX "" SUFFIX ".dll" OUTPUT_NAME "soundflow-ffmpeg")
 elseif(TARGET_OS STREQUAL "linux" OR TARGET_OS STREQUAL "freebsd" OR TARGET_OS STREQUAL "android")
     set_target_properties(soundflow_ffmpeg PROPERTIES
-            PREFIX "lib" SUFFIX ".so" OUTPUT_NAME "soundflow_ffmpeg")
+            PREFIX "lib" SUFFIX ".so" OUTPUT_NAME "soundflow-ffmpeg")
 elseif(TARGET_OS STREQUAL "osx")
     set_target_properties(soundflow_ffmpeg PROPERTIES
-            PREFIX "lib" SUFFIX ".dylib" OUTPUT_NAME "soundflow_ffmpeg")
+            PREFIX "lib" SUFFIX ".dylib" OUTPUT_NAME "soundflow-ffmpeg")
 elseif(TARGET_OS STREQUAL "ios")
     set_target_properties(soundflow_ffmpeg PROPERTIES
             FRAMEWORK TRUE
-            OUTPUT_NAME "soundflow_ffmpeg"
+            OUTPUT_NAME "soundflow-ffmpeg"
             FRAMEWORK_VERSION A
             MACOSX_FRAMEWORK_IDENTIFIER com.soundflow.ffmpeg)
 endif()
@@ -519,4 +519,5 @@ elseif(TARGET_OS STREQUAL "linux" OR TARGET_OS STREQUAL "freebsd")
     target_link_libraries(soundflow_ffmpeg PRIVATE m pthread)
 elseif(TARGET_OS STREQUAL "android")
     target_link_libraries(soundflow_ffmpeg PRIVATE m atomic)
+    target_link_options(soundflow_ffmpeg PRIVATE "-Wl,-z,max-page-size=16384")
 endif()
