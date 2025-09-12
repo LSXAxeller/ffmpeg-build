@@ -16,15 +16,18 @@ jobs:
       matrix:
         include:
           - arch: x64
+            os: windows-latest
             msystem: MINGW64
             mingw-package-prefix: mingw-w64-x86_64
           - arch: x86
+            os: windows-latest
             msystem: MINGW32
             mingw-package-prefix: mingw-w64-i686
           - arch: arm64
+            os: windows-11-arm
             msystem: CLANGARM64
             mingw-package-prefix: mingw-w64-clang-aarch64
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: msys2 {0}
