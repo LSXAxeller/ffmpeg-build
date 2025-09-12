@@ -363,8 +363,10 @@ elseif(TARGET_OS STREQUAL "linux")
         set(FFMPEG_ARCH "x86_64")
     elseif(TARGET_ARCH STREQUAL "arm")
         set(FFMPEG_ARCH "arm")
+        set(LINUX_CROSS_PREFIX "arm-linux-gnueabihf-")
     else()
         set(FFMPEG_ARCH "aarch64")
+        set(LINUX_CROSS_PREFIX "aarch64-linux-gnu-")
     endif()
 
     list(APPEND FFMPEG_COMMON_FLAGS
@@ -375,7 +377,7 @@ elseif(TARGET_OS STREQUAL "linux")
     if(CMAKE_CROSSCOMPILING)
         list(APPEND FFMPEG_COMMON_FLAGS
                 --enable-cross-compile
-                --cross-prefix=aarch64-linux-gnu-)
+                --cross-prefix=${LINUX_CROSS_PREFIX})
     endif()
 
 elseif(TARGET_OS STREQUAL "android")

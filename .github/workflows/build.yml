@@ -18,12 +18,17 @@ jobs:
           - arch: x64
             msystem: MINGW64
             mingw-package-prefix: mingw-w64-x86_64
+            compiler_packages: mingw-w64-x86_64-gcc
           - arch: x86
             msystem: MINGW32
             mingw-package-prefix: mingw-w64-i686
+            compiler_packages: mingw-w64-i686-gcc
           - arch: arm64
-            msystem: CLANGARM64
-            mingw-package-prefix: mingw-w64-clang-aarch64
+            msystem: MINGW64
+            mingw-package-prefix: mingw-w64-x86_64
+            compiler_packages: >-
+              mingw-w64-x86_64-clang
+              mingw-w64-x86_64-lld
     runs-on: windows-latest
     defaults:
       run:
@@ -36,7 +41,7 @@ jobs:
           msystem: ${{ matrix.msystem }}
           update: true
           install: >-
-            ${{ matrix.mingw-package-prefix }}-gcc
+            ${{ matrix.compiler_packages }}
             ${{ matrix.mingw-package-prefix }}-cmake
             ${{ matrix.mingw-package-prefix }}-ninja
             ${{ matrix.mingw-package-prefix }}-make
@@ -46,13 +51,50 @@ jobs:
             nasm
             yasm
 
+      - name: Create ARM64 Toolchain File
+        if: matrix.arch == 'arm64'
+        run: |
+          cat <<EOF > arm64-toolchain.cmake
+          # Set the target system and processor
+          set(CMAKE_SYSTEM_NAME Windows)
+          set(CMAKE_SYSTEM_PROCESSOR aarch64)
+
+          # Specify the cross-compilers
+          set(CMAKE_C_COMPILER   clang)
+          set(CMAKE_CXX_COMPILER clang++)
+          set(CMAKE_RC_COMPILER  llvm-windres)
+
+          # Set the target triplet for the compiler
+          set(CMAKE_C_COMPILER_TARGET   aarch64-w64-mingw32)
+          set(CMAKE_CXX_COMPILER_TARGET aarch64-w64-mingw32)
+
+          # Configure find search paths for cross-compiling
+          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+          EOF
+
       - name: Configure and Build
         run: |
+          CMAKE_EXTRA_ARGS=""
+          if [[ "${{ matrix.arch }}" == "arm64" ]]; then
+            CMAKE_EXTRA_ARGS="-DCMAKE_TOOLCHAIN_FILE=../arm64-toolchain.cmake"
+          fi
+
           mkdir build
           cd build
-          cmake .. -G "MinGW Makefiles" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }}
+
+          if [[ "${{ matrix.arch }}" != "arm64" ]]; then
+            cmake .. -G "Ninja" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }}
+          else
+            cmake .. -G "Ninja" \
+              -DCMAKE_BUILD_TYPE=Release \
+              $CMAKE_EXTRA_ARGS
+          fi
+
           cmake --build . --parallel $(nproc) --verbose
 
       - name: Upload artifacts
@@ -88,13 +130,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # IMPROVEMENT: Consolidated dependency installation into a single step.
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake nasm yasm pkg-config ${{ matrix.toolchain_pkgs }}
 
-      # IMPROVEMENT: Consolidated configure and build step into a single step.
       - name: Configure and Build
         run: |
           mkdir build
