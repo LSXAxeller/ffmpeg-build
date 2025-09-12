@@ -363,10 +363,8 @@ elseif(TARGET_OS STREQUAL "linux")
         set(FFMPEG_ARCH "x86_64")
     elseif(TARGET_ARCH STREQUAL "arm")
         set(FFMPEG_ARCH "arm")
-        set(LINUX_CROSS_PREFIX "arm-linux-gnueabihf-")
     else()
         set(FFMPEG_ARCH "aarch64")
-        set(LINUX_CROSS_PREFIX "aarch64-linux-gnu-")
     endif()
 
     list(APPEND FFMPEG_COMMON_FLAGS
@@ -377,7 +375,7 @@ elseif(TARGET_OS STREQUAL "linux")
     if(CMAKE_CROSSCOMPILING)
         list(APPEND FFMPEG_COMMON_FLAGS
                 --enable-cross-compile
-                --cross-prefix=${LINUX_CROSS_PREFIX})
+                --cross-prefix=aarch64-linux-gnu-)
     endif()
 
 elseif(TARGET_OS STREQUAL "android")
@@ -442,17 +440,15 @@ endif()
 # External build of FFmpeg
 find_program(BASH_EXECUTABLE bash REQUIRED)
 
-# Consolidate all FFmpeg configure arguments into a single list for robustness
-set(FFMPEG_CONFIGURE_ARGS --prefix=${FFMPEG_INSTALL_DIR})
-list(APPEND FFMPEG_CONFIGURE_ARGS ${FFMPEG_COMMON_FLAGS})
-
 include(ExternalProject)
 ExternalProject_Add(ffmpeg_dependency
         URL               ${FFMPEG_URL}
         PREFIX            ${CMAKE_BINARY_DIR}/ffmpeg
         INSTALL_DIR       ${FFMPEG_INSTALL_DIR}
         BUILD_IN_SOURCE   1
-        CONFIGURE_COMMAND <SOURCE_DIR>/configure ${FFMPEG_CONFIGURE_ARGS}
+        CONFIGURE_COMMAND ${BASH_EXECUTABLE} <SOURCE_DIR>/configure
+        --prefix=${FFMPEG_INSTALL_DIR}
+        ${FFMPEG_COMMON_FLAGS}
         BUILD_COMMAND     ${CMAKE_MAKE_PROGRAM} -j${CMAKE_BUILD_PARALLEL_LEVEL}
         INSTALL_COMMAND   ${CMAKE_MAKE_PROGRAM} install
         LOG_DOWNLOAD      1

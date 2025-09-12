@@ -204,7 +204,7 @@ jobs:
           - arch: x64
             vm_arch: x86_64
           - arch: arm64
-            vm_arch: aarch64
+            vm_arch: arm64
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
