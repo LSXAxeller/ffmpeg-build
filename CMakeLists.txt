@@ -338,12 +338,7 @@ if(TARGET_OS STREQUAL "win")
             "--extra-ldflags=-static")
 
     if(CMAKE_CROSSCOMPILING)
-        if(TARGET_ARCH STREQUAL "arm64")
-            # Special handling for clang-based MinGW for ARM64
-            list(APPEND FFMPEG_COMMON_FLAGS --cross-prefix=aarch64-w64-mingw32-)
-        else()
-            list(APPEND FFMPEG_COMMON_FLAGS --cross-prefix=${FFMPEG_ARCH}-w64-mingw32-)
-        endif()
+        list(APPEND FFMPEG_COMMON_FLAGS --cross-prefix=${FFMPEG_ARCH}-w64-mingw32-)
     endif()
 
 elseif(TARGET_OS STREQUAL "osx")
