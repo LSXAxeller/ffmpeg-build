@@ -58,6 +58,25 @@ jobs:
             -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }}
           cmake --build . --parallel $(nproc) --verbose
 
+      - name: Analyze Dependencies
+        shell: msys2 {0}
+        run: |
+          ARTIFACT_DIR="build/runtimes/win-${{ matrix.arch }}/native"
+          echo "--- Analyzing artifacts in $ARTIFACT_DIR ---"
+          for lib in $ARTIFACT_DIR/*.dll; do
+            if [ -f "$lib" ]; then
+              echo "=========================================="
+              echo "Analyzing: $(basename "$lib")"
+              echo "=========================================="
+              echo "=== File Info ==="
+              file "$lib"
+              echo -e "\n=== Dependencies (Imported DLLs) ==="
+              objdump -p "$lib" | grep "DLL Name:" || echo "No DLL dependencies found."
+              echo -e "\n=== Exports (Exported Functions) ==="
+              nm -g "$lib" | grep " T " || echo "No exported functions found."
+            fi
+          done
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -91,19 +110,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # IMPROVEMENT: Consolidated dependency installation into a single step.
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake nasm yasm pkg-config ${{ matrix.toolchain_pkgs }}
 
-      # IMPROVEMENT: Consolidated configure and build step into a single step.
       - name: Configure and Build
         run: |
           mkdir build
           cd build
           cmake .. -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_opts }}
           cmake --build . --parallel $(nproc) --verbose
+
+      - name: Analyze Dependencies
+        run: |
+          NM_CMD="nm"
+          if [[ "${{ matrix.arch }}" == "arm64" ]]; then
+            NM_CMD="aarch64-linux-gnu-nm"
+          elif [[ "${{ matrix.arch }}" == "arm" ]]; then
+            NM_CMD="arm-linux-gnueabihf-nm"
+          fi
+          ARTIFACT_DIR="build/runtimes/linux-${{ matrix.arch }}/native"
+          echo "--- Analyzing artifacts in $ARTIFACT_DIR ---"
+          for lib in $ARTIFACT_DIR/*.so; do
+            if [ -f "$lib" ]; then
+              echo "=========================================="
+              echo "Analyzing: $(basename "$lib")"
+              echo "=========================================="
+              echo "=== File Info ==="
+              file "$lib"
+              echo -e "\n=== Dependencies ==="
+              # Use readelf for cross-compiled binaries as ldd won't work
+              if [[ "${{ matrix.arch }}" == "x64" ]]; then
+                ldd "$lib" || readelf -d "$lib" | grep "NEEDED" || echo "No dependencies found."
+              else
+                readelf -d "$lib" | grep "NEEDED" || echo "No dependencies found."
+              fi
+              echo -e "\n=== Exports (Exported Functions) ==="
+              $NM_CMD -gD "$lib" | grep " T " || echo "No exported functions found."
+            fi
+          done
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -145,6 +191,25 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }} \
             -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_arch }}
           cmake --build . --parallel $(sysctl -n hw.ncpu) --verbose
+
+      - name: Analyze Dependencies
+        run: |
+          ARTIFACT_DIR="build/runtimes/osx-${{ matrix.arch }}/native"
+          echo "--- Analyzing artifacts in $ARTIFACT_DIR ---"
+          for lib in $ARTIFACT_DIR/*.dylib; do
+            if [ -f "$lib" ]; then
+              echo "=========================================="
+              echo "Analyzing: $(basename "$lib")"
+              echo "=========================================="
+              echo "=== File Info ==="
+              file "$lib"
+              lipo -info "$lib"
+              echo -e "\n=== Dependencies ==="
+              otool -L "$lib"
+              echo -e "\n=== Exports (Exported Functions) ==="
+              nm -g "$lib" | grep " T " || echo "No exported functions found."
+            fi
+          done
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -192,6 +257,29 @@ jobs:
             -DANDROID_PLATFORM=21
           cmake --build . --parallel $(nproc) --verbose
 
+      - name: Analyze Dependencies
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          TOOLCHAIN_BIN="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          NM_CMD="$TOOLCHAIN_BIN/llvm-nm"
+          READELF_CMD="$TOOLCHAIN_BIN/llvm-readelf"
+          ARTIFACT_DIR="build/runtimes/android-${{ matrix.rid_arch }}/native"
+          echo "--- Analyzing artifacts in $ARTIFACT_DIR ---"
+          for lib in $ARTIFACT_DIR/*.so; do
+            if [ -f "$lib" ]; then
+              echo "=========================================="
+              echo "Analyzing: $(basename "$lib")"
+              echo "=========================================="
+              echo "=== File Info ==="
+              file "$lib"
+              echo -e "\n=== Dependencies ==="
+              $READELF_CMD -d "$lib" | grep "NEEDED" || echo "No dependencies found."
+              echo -e "\n=== Exports (Exported Functions) ==="
+              $NM_CMD -gD "$lib" | grep " T " || echo "No exported functions found."
+            fi
+          done
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -231,6 +319,26 @@ jobs:
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_MAKE_PROGRAM=gmake
             cmake --build . --parallel $(sysctl -n hw.ncpu) --verbose
+            
+            # Go back to project root
+            cd ..
+
+            # Analyze Dependencies
+            ARTIFACT_DIR="build/runtimes/freebsd-${{ matrix.arch }}/native"
+            echo "--- Analyzing artifacts in $ARTIFACT_DIR ---"
+            for lib in $ARTIFACT_DIR/*.so; do
+              if [ -f "$lib" ]; then
+                echo "=========================================="
+                echo "Analyzing: $(basename "$lib")"
+                echo "=========================================="
+                echo "=== File Info ==="
+                file "$lib"
+                echo -e "\n=== Dependencies ==="
+                ldd "$lib" || echo "ldd failed or no dependencies found."
+                echo -e "\n=== Exports (Exported Functions) ==="
+                nm -gD "$lib" | grep " T " || echo "No exported functions found."
+              fi
+            done
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -263,6 +371,25 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
           cmake --build . --parallel $(sysctl -n hw.ncpu) --verbose
+
+      - name: Analyze Dependencies
+        run: |
+          ARTIFACT_DIR="build/runtimes/ios-arm64/native"
+          echo "--- Analyzing artifacts in $ARTIFACT_DIR ---"
+          for lib in $ARTIFACT_DIR/*.dylib; do
+            if [ -f "$lib" ]; then
+              echo "=========================================="
+              echo "Analyzing: $(basename "$lib")"
+              echo "=========================================="
+              echo "=== File Info ==="
+              file "$lib"
+              lipo -info "$lib"
+              echo -e "\n=== Dependencies ==="
+              otool -L "$lib"
+              echo -e "\n=== Exports (Exported Functions) ==="
+              nm -g "$lib" | grep " T " || echo "No exported functions found."
+            fi
+          done
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
