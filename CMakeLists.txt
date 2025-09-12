@@ -441,6 +441,7 @@ endif()
 
 # External build of FFmpeg
 find_program(BASH_EXECUTABLE bash REQUIRED)
+find_program(MAKE_EXECUTABLE make REQUIRED)
 
 include(ExternalProject)
 ExternalProject_Add(ffmpeg_dependency
@@ -451,8 +452,8 @@ ExternalProject_Add(ffmpeg_dependency
         CONFIGURE_COMMAND ${BASH_EXECUTABLE} <SOURCE_DIR>/configure
         --prefix=${FFMPEG_INSTALL_DIR}
         ${FFMPEG_COMMON_FLAGS}
-        BUILD_COMMAND     ${CMAKE_MAKE_PROGRAM} -j${CMAKE_BUILD_PARALLEL_LEVEL}
-        INSTALL_COMMAND   ${CMAKE_MAKE_PROGRAM} install
+        BUILD_COMMAND     ${MAKE_EXECUTABLE} -j${CMAKE_BUILD_PARALLEL_LEVEL}
+        INSTALL_COMMAND   ${MAKE_EXECUTABLE} install
         LOG_DOWNLOAD      1
         LOG_CONFIGURE     1
         LOG_BUILD         1
